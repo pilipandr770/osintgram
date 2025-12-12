@@ -1,0 +1,132 @@
+{% extends 'base.html' %}
+
+{% block title %}Дашборд - InstagramOSINT{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='dashboard.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="dashboard">
+    <div class="dashboard-header">
+        <h1>Добро пожаловать, {{ current_user.username }}! 👋</h1>
+        {% if current_user.company_name %}
+            <p class="company-name">{{ current_user.company_name }}</p>
+        {% endif %}
+    </div>
+    
+    <div class="stats-grid">
+        <div class="stat-card">
+            <div class="stat-icon">👤</div>
+            <div class="stat-content">
+                <h3>{{ instagram_accounts_count }}</h3>
+                <p>Instagram аккаунтов</p>
+            </div>
+            <a href="{{ url_for('manage_accounts') }}" class="stat-link">Управлять →</a>
+        </div>
+        
+        <div class="stat-card highlight">
+            <div class="stat-icon">👥</div>
+            <div class="stat-content">
+                <h3>{{ total_followers }}</h3>
+                <p>Собранных подписчиков</p>
+            </div>
+            <a href="{{ url_for('followers_table') }}" class="stat-link">Просмотреть →</a>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">📧</div>
+            <div class="stat-content">
+                <h3>{{ followers_with_email }}</h3>
+                <p>С email адресами</p>
+            </div>
+            <a href="{{ url_for('followers_table') }}?has_email=on" class="stat-link">Фильтровать →</a>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">🔍</div>
+            <div class="stat-content">
+                <h3>{{ parse_sessions_count }}</h3>
+                <p>Сессий парсинга</p>
+            </div>
+            <a href="{{ url_for('statistics') }}" class="stat-link">Статистика →</a>
+        </div>
+    </div>
+    
+    <div class="quick-actions">
+        <h2>Быстрые действия</h2>
+        <div class="actions-grid">
+            <a href="{{ url_for('parse_competitors') }}" class="action-card">
+                <span class="action-icon">🔍</span>
+                <span class="action-text">Начать парсинг</span>
+            </a>
+            <a href="{{ url_for('manage_accounts') }}" class="action-card">
+                <span class="action-icon">➕</span>
+                <span class="action-text">Добавить аккаунт</span>
+            </a>
+            <a href="{{ url_for('export_csv') }}" class="action-card">
+                <span class="action-icon">📥</span>
+                <span class="action-text">Экспорт CSV</span>
+            </a>
+            <a href="{{ url_for('publish_content') }}" class="action-card">
+                <span class="action-icon">📤</span>
+                <span class="action-text">Публикация</span>
+            </a>
+        </div>
+    </div>
+    
+    <div class="recent-sessions">
+        <h2>Последние сессии парсинга</h2>
+        
+        {% if recent_sessions %}
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Конкуренты</th>
+                            <th>Статус</th>
+                            <th>Собрано</th>
+                            <th>Дата</th>
+                            <th>Действия</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for session in recent_sessions %}
+                            <tr>
+                                <td class="competitors-cell">
+                                    {% for username in session.competitor_usernames[:3] %}
+                                        <span class="competitor-tag">@{{ username }}</span>
+                                    {% endfor %}
+                                    {% if session.competitor_usernames|length > 3 %}
+                                        <span class="more-tag">+{{ session.competitor_usernames|length - 3 }}</span>
+                                    {% endif %}
+                                </td>
+                                <td>
+                                    <span class="badge badge-{{ session.status }}">
+                                        {% if session.status == 'completed' %}✓ Завершено
+                                        {% elif session.status == 'processing' %}⏳ Обработка
+                                        {% elif session.status == 'failed' %}✗ Ошибка
+                                        {% else %}⏸ Ожидание{% endif %}
+                                    </span>
+                                </td>
+                                <td><strong>{{ session.total_followers_collected }}</strong></td>
+                                <td>{{ session.started_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                                <td>
+                                    <a href="{{ url_for('followers_table', session_id=session.id) }}" class="btn btn-small">
+                                        Просмотреть
+                                    </a>
+                                </td>
+                            </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        {% else %}
+            <div class="empty-state">
+                <p>У вас еще нет сессий парсинга.</p>
+                <a href="{{ url_for('parse_competitors') }}" class="btn btn-primary">Начать парсинг</a>
+            </div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

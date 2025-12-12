@@ -1,0 +1,131 @@
+{% extends 'base.html' %}
+
+{% block title %}Публикация контента{% endblock %}
+
+{% block content %}
+<div class="publish-page">
+    <div class="page-header">
+        <h1>📤 Публикация контента в Instagram</h1>
+        <p>Публикуйте посты, истории и карусели</p>
+    </div>
+    
+    <div class="two-columns">
+        <div class="publish-form-section">
+            <div class="card">
+                <h2>Создать публикацию</h2>
+                
+                <form method="POST" action="{{ url_for('publish_content') }}" enctype="multipart/form-data" class="publish-form">
+                    <div class="form-group">
+                        <label for="instagram_account_id">Аккаунт для публикации</label>
+                        <select id="instagram_account_id" name="instagram_account_id" required>
+                            <option value="">-- Выберите аккаунт --</option>
+                            {% for account in accounts %}
+                                <option value="{{ account.id }}">
+                                    @{{ account.instagram_username }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                        {% if not accounts %}
+                            <div class="warning-box">
+                                <p>⚠️ Добавьте Instagram аккаунт для публикации</p>
+                                <a href="{{ url_for('manage_accounts') }}">Добавить аккаунт</a>
+                            </div>
+                        {% endif %}
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="content_type">Тип контента</label>
+                        <select id="content_type" name="content_type" required onchange="updateMediaLabel()">
+                            <option value="post">📷 Пост (одна фотография)</option>
+                            <option value="carousel">🎠 Карусель (несколько фото)</option>
+                            <option value="story">📱 История</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="media_files" id="media_label">Загрузите фотографию</label>
+                        <input type="file" id="media_files" name="media_files" required 
+                            accept="image/*" class="file-input">
+                        <small>Поддерживаемые форматы: JPG, PNG. Рекомендуемый размер: 1080x1350 px</small>
+                    </div>
+                    
+                    <div class="form-group" id="caption-group">
+                        <label for="caption">Подпись к посту</label>
+                        <textarea id="caption" name="caption" rows="5" 
+                            placeholder="Напишите текст поста...&#10;&#10;Добавьте хэштеги: #example #instagram"></textarea>
+                        <small>Рекомендуем использовать 20-30 хэштегов</small>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary btn-large btn-block" {% if not accounts %}disabled{% endif %}>
+                        📤 Опубликовать
+                    </button>
+                </form>
+            </div>
+        </div>
+        
+        <div class="tips-section">
+            <div class="card tips-card">
+                <h3>📋 Рекомендации для публикации</h3>
+                <ul class="tips-list">
+                    <li>Публикуйте регулярно (3-4 раза в неделю)</li>
+                    <li>Используйте 20-30 релевантных хэштегов</li>
+                    <li>Задавайте вопросы для engagement</li>
+                    <li>Публикуйте в пиковые часы (18:00-21:00)</li>
+                    <li>Используйте Call-to-Action в конце</li>
+                    <li>Размер фото: 1080x1350 px (портрет)</li>
+                    <li>Для каруселей: максимум 10 фото</li>
+                </ul>
+            </div>
+            
+            {% if publications %}
+                <div class="card">
+                    <h3>📜 История публикаций</h3>
+                    <div class="publications-list">
+                        {% for pub in publications %}
+                            <div class="publication-item">
+                                <div class="pub-icon">
+                                    {% if pub.content_type == 'post' %}📷
+                                    {% elif pub.content_type == 'carousel' %}🎠
+                                    {% elif pub.content_type == 'story' %}📱
+                                    {% else %}📄{% endif %}
+                                </div>
+                                <div class="pub-info">
+                                    <span class="pub-type">{{ pub.content_type|title }}</span>
+                                    <span class="pub-date">{{ pub.created_at.strftime('%d.%m.%Y %H:%M') }}</span>
+                                </div>
+                                <span class="badge badge-{{ pub.status }}">
+                                    {% if pub.status == 'published' %}✓
+                                    {% elif pub.status == 'failed' %}✗
+                                    {% else %}⏳{% endif %}
+                                </span>
+                            </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+function updateMediaLabel() {
+    const contentType = document.getElementById('content_type').value;
+    const label = document.getElementById('media_label');
+    const input = document.getElementById('media_files');
+    const captionGroup = document.getElementById('caption-group');
+    
+    if (contentType === 'carousel') {
+        label.textContent = 'Загрузите фотографии (2-10 файлов)';
+        input.multiple = true;
+    } else if (contentType === 'story') {
+        label.textContent = 'Загрузите фото или видео для истории';
+        input.multiple = false;
+        captionGroup.style.display = 'none';
+    } else {
+        label.textContent = 'Загрузите фотографию';
+        input.multiple = false;
+        captionGroup.style.display = 'block';
+    }
+}
+</script>
+{% endblock %}

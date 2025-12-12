@@ -1,0 +1,17 @@
+{% extends 'base.html' %}
+
+{% block title %}500 - Ошибка сервера{% endblock %}
+
+{% block content %}
+<div class="error-page">
+    <div class="error-content">
+        <h1 class="error-code">500</h1>
+        <h2>Ошибка сервера</h2>
+        <p>Произошла внутренняя ошибка сервера. Мы уже работаем над её устранением.</p>
+        <div class="error-actions">
+            <a href="{{ url_for('dashboard') }}" class="btn btn-primary">На главную</a>
+            <a href="javascript:location.reload()" class="btn btn-secondary">Обновить страницу</a>
+        </div>
+    </div>
+</div>
+{% endblock %}

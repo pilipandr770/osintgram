@@ -1,0 +1,160 @@
+{% extends 'base.html' %}
+
+{% block title %}Статистика{% endblock %}
+
+{% block content %}
+<div class="statistics-page">
+    <div class="page-header">
+        <h1>📊 Статистика парсинга</h1>
+        <p>Обзор всех сессий и результатов</p>
+    </div>
+    
+    <div class="stats-overview">
+        <div class="stat-card">
+            <div class="stat-icon">👥</div>
+            <div class="stat-content">
+                <h3>{{ total_followers }}</h3>
+                <p>Всего подписчиков</p>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">📧</div>
+            <div class="stat-content">
+                <h3>{{ followers_with_email }}</h3>
+                <p>С email</p>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">✓</div>
+            <div class="stat-content">
+                <h3>{{ verified_followers }}</h3>
+                <p>Верифицированных</p>
+            </div>
+        </div>
+        
+        <div class="stat-card">
+            <div class="stat-icon">💼</div>
+            <div class="stat-content">
+                <h3>{{ business_followers }}</h3>
+                <p>Бизнес-аккаунтов</p>
+            </div>
+        </div>
+    </div>
+    
+    <div class="two-columns">
+        <div class="sessions-section">
+            <div class="card">
+                <h2>🔍 История сессий парсинга</h2>
+                
+                {% if sessions %}
+                    <div class="table-responsive">
+                        <table class="table">
+                            <thead>
+                                <tr>
+                                    <th>Дата</th>
+                                    <th>Конкуренты</th>
+                                    <th>Статус</th>
+                                    <th>Собрано</th>
+                                    <th>Длительность</th>
+                                    <th>Действия</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for session in sessions %}
+                                    <tr>
+                                        <td>{{ session.started_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                                        <td>
+                                            {% for username in session.competitor_usernames %}
+                                                <span class="competitor-tag">@{{ username }}</span>
+                                            {% endfor %}
+                                        </td>
+                                        <td>
+                                            <span class="badge badge-{{ session.status }}">
+                                                {{ session.status }}
+                                            </span>
+                                        </td>
+                                        <td><strong>{{ session.total_followers_collected }}</strong></td>
+                                        <td>
+                                            {% if session.duration_seconds %}
+                                                {{ (session.duration_seconds // 60) }}м {{ session.duration_seconds % 60 }}с
+                                            {% else %}
+                                                -
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <a href="{{ url_for('followers_table', session_id=session.id) }}" class="btn btn-small">
+                                                Просмотр
+                                            </a>
+                                        </td>
+                                    </tr>
+                                    
+                                    {% if session.failed_accounts %}
+                                        <tr class="error-row">
+                                            <td colspan="6">
+                                                <div class="error-details">
+                                                    <strong>Ошибки:</strong>
+                                                    {% for username, error in session.failed_accounts.items() %}
+                                                        <span>@{{ username }}: {{ error }}</span>
+                                                    {% endfor %}
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    {% endif %}
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                {% else %}
+                    <div class="empty-state">
+                        <p>Нет сессий парсинга</p>
+                        <a href="{{ url_for('parse_competitors') }}" class="btn btn-primary">Начать парсинг</a>
+                    </div>
+                {% endif %}
+            </div>
+        </div>
+        
+        <div class="exports-section">
+            <div class="card">
+                <h2>📥 История экспортов</h2>
+                
+                {% if exports %}
+                    <div class="exports-list">
+                        {% for export in exports %}
+                            <div class="export-item">
+                                <div class="export-icon">
+                                    {% if export.export_type == 'csv' %}📄
+                                    {% elif export.export_type == 'json' %}📋
+                                    {% else %}📥{% endif %}
+                                </div>
+                                <div class="export-info">
+                                    <span class="export-type">{{ export.export_type|upper }}</span>
+                                    <span class="export-rows">{{ export.rows_exported }} записей</span>
+                                    <span class="export-date">{{ export.exported_at.strftime('%d.%m.%Y %H:%M') }}</span>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                {% else %}
+                    <div class="empty-state">
+                        <p>Нет истории экспортов</p>
+                    </div>
+                {% endif %}
+            </div>
+            
+            <div class="card">
+                <h3>Быстрый экспорт</h3>
+                <div class="export-actions">
+                    <a href="{{ url_for('export_csv') }}" class="btn btn-success btn-block">
+                        📥 Meta Ads CSV
+                    </a>
+                    <a href="{{ url_for('export_full_csv') }}" class="btn btn-secondary btn-block">
+                        📥 Полный CSV
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

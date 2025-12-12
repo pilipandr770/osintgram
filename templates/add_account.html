@@ -1,0 +1,134 @@
+{% extends 'base.html' %}
+
+{% block title %}Мои Instagram аккаунты{% endblock %}
+
+{% block content %}
+<div class="accounts-page">
+    <div class="page-header">
+        <h1>👤 Мои Instagram аккаунты</h1>
+        <p>Добавьте аккаунты Instagram для парсинга и публикации контента</p>
+    </div>
+    
+    <div class="two-columns">
+        <div class="add-account-section">
+            <div class="card">
+                <h2>➕ Добавить новый аккаунт</h2>
+                
+                <form method="POST" action="{{ url_for('manage_accounts') }}" class="account-form">
+                    <div class="form-group">
+                        <label for="instagram_username">Instagram Username</label>
+                        <input type="text" id="instagram_username" name="instagram_username" required 
+                            placeholder="@yourprofile">
+                        <small>Без символа @ или с ним - оба варианта работают</small>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="instagram_password">Пароль</label>
+                        <input type="password" id="instagram_password" name="instagram_password" required
+                            placeholder="Пароль от Instagram">
+                    </div>
+                    
+                    <div class="form-group">
+                        <label for="proxy">Прокси (опционально)</label>
+                        <input type="text" id="proxy" name="proxy" 
+                            placeholder="http://user:pass@host:port или http://host:port">
+                        <small>Если ваш IP заблокирован Instagram - укажите прокси или используйте VPN</small>
+                    </div>
+                    
+                    <div class="warning-box">
+                        <p>⚠️ <strong>Важно:</strong></p>
+                        <ul>
+                            <li>Если ошибка "IP in blacklist" - включите VPN или используйте прокси</li>
+                            <li>Сначала войдите в Instagram через браузер с этого IP</li>
+                            <li>Отключите 2FA или используйте App Password</li>
+                        </ul>
+                    </div>
+                    
+                    <button type="submit" class="btn btn-primary btn-block">
+                        Добавить аккаунт
+                    </button>
+                </form>
+            </div>
+        </div>
+        
+        <div class="accounts-list-section">
+            <h2>Ваши аккаунты ({{ accounts|length }})</h2>
+            
+            {% if accounts %}
+                <div class="accounts-grid">
+                    {% for account in accounts %}
+                        <div class="account-card">
+                            <div class="account-header">
+                                {% if account.profile_pic_url %}
+                                    <img src="{{ account.profile_pic_url }}" alt="Profile" class="profile-pic">
+                                {% else %}
+                                    <div class="profile-pic-placeholder">👤</div>
+                                {% endif %}
+                                
+                                <div class="account-info">
+                                    <h3>@{{ account.instagram_username }}</h3>
+                                    <p>{{ account.full_name or 'Без имени' }}</p>
+                                </div>
+                                
+                                {% if account.is_verified %}
+                                    <span class="verified-badge" title="Верифицирован">✓</span>
+                                {% endif %}
+                            </div>
+                            
+                            <div class="account-stats">
+                                <div class="stat">
+                                    <span class="stat-value">{{ account.followers_count or 0 }}</span>
+                                    <span class="stat-label">подписчиков</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-value">{{ account.following_count or 0 }}</span>
+                                    <span class="stat-label">подписок</span>
+                                </div>
+                                <div class="stat">
+                                    <span class="stat-value">{{ account.posts_count or 0 }}</span>
+                                    <span class="stat-label">постов</span>
+                                </div>
+                            </div>
+                            
+                            <div class="account-badges">
+                                {% if account.is_business %}
+                                    <span class="badge badge-business">Бизнес</span>
+                                {% endif %}
+                                {% if account.is_private %}
+                                    <span class="badge badge-private">Приватный</span>
+                                {% endif %}
+                                {% if account.is_active %}
+                                    <span class="badge badge-active">Активен</span>
+                                {% else %}
+                                    <span class="badge badge-inactive">Неактивен</span>
+                                {% endif %}
+                            </div>
+                            
+                            {% if account.last_sync %}
+                                <p class="last-sync">Синхронизирован: {{ account.last_sync.strftime('%d.%m.%Y %H:%M') }}</p>
+                            {% endif %}
+                            
+                            <div class="account-actions">
+                                <a href="{{ url_for('parse_competitors') }}?account_id={{ account.id }}" class="btn btn-small btn-primary">
+                                    🔍 Парсинг
+                                </a>
+                                <form method="POST" action="{{ url_for('delete_account', account_id=account.id) }}" 
+                                    onsubmit="return confirm('Удалить аккаунт @{{ account.instagram_username }}?');" style="display: inline;">
+                                    <button type="submit" class="btn btn-small btn-danger">
+                                        🗑 Удалить
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% else %}
+                <div class="empty-state">
+                    <p>У вас еще нет добавленных аккаунтов.</p>
+                    <p>Добавьте первый аккаунт, чтобы начать парсинг!</p>
+                </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+{% endblock %}

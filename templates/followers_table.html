@@ -1,0 +1,180 @@
+{% extends 'base.html' %}
+
+{% block title %}Подписчики{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for('static', filename='tables.css') }}">
+{% endblock %}
+
+{% block content %}
+<div class="followers-page">
+    <div class="page-header">
+        <h1>👥 Собранные подписчики</h1>
+        <p>Всего: <strong>{{ followers.total }}</strong> записей</p>
+    </div>
+    
+    <div class="filters-section">
+        <form method="GET" action="{{ url_for('followers_table') }}" class="filters-form">
+            {% if session_id %}
+                <input type="hidden" name="session_id" value="{{ session_id }}">
+            {% endif %}
+            
+            <div class="filters-row">
+                <div class="filter-group">
+                    <label for="min_followers">Минимум подписчиков</label>
+                    <input type="number" id="min_followers" name="min_followers" 
+                        value="{{ request.args.get('min_followers', '') }}" placeholder="0">
+                </div>
+                
+                <div class="filter-group">
+                    <label for="source_account">Источник</label>
+                    <select id="source_account" name="source_account">
+                        <option value="">Все источники</option>
+                        {% for source in source_accounts %}
+                            <option value="{{ source }}" 
+                                {% if request.args.get('source_account') == source %}selected{% endif %}>
+                                @{{ source }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                </div>
+                
+                <div class="filter-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="has_email" 
+                            {% if request.args.get('has_email') %}checked{% endif %}>
+                        Только с email
+                    </label>
+                </div>
+                
+                <div class="filter-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="is_verified" 
+                            {% if request.args.get('is_verified') %}checked{% endif %}>
+                        Верифицированные
+                    </label>
+                </div>
+                
+                <div class="filter-group checkbox-group">
+                    <label>
+                        <input type="checkbox" name="is_business" 
+                            {% if request.args.get('is_business') %}checked{% endif %}>
+                        Бизнес-аккаунты
+                    </label>
+                </div>
+                
+                <div class="filter-actions">
+                    <button type="submit" class="btn btn-secondary">Применить</button>
+                    <a href="{{ url_for('followers_table') }}" class="btn btn-outline">Сбросить</a>
+                </div>
+            </div>
+        </form>
+    </div>
+    
+    <div class="export-section">
+        <a href="{{ url_for('export_csv') }}{% if session_id %}?session_id={{ session_id }}{% endif %}" 
+            class="btn btn-success">
+            📥 Экспорт для Meta Ads
+        </a>
+        <a href="{{ url_for('export_full_csv') }}{% if session_id %}?session_id={{ session_id }}{% endif %}" 
+            class="btn btn-secondary">
+            📥 Полный экспорт CSV
+        </a>
+    </div>
+    
+    {% if followers.items %}
+        <div class="table-responsive">
+            <table class="followers-table">
+                <thead>
+                    <tr>
+                        <th>Профиль</th>
+                        <th>Username</th>
+                        <th>Полное имя</th>
+                        <th>Подписчики</th>
+                        <th>Email</th>
+                        <th>Статус</th>
+                        <th>Score</th>
+                        <th>Источник</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for follower in followers.items %}
+                        <tr>
+                            <td class="profile-cell">
+                                {% if follower.profile_pic_url %}
+                                    <img src="{{ follower.profile_pic_url }}" alt="Avatar" class="avatar">
+                                {% else %}
+                                    <div class="avatar-placeholder">👤</div>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <a href="https://instagram.com/{{ follower.username }}" target="_blank" rel="noopener">
+                                    @{{ follower.username }}
+                                </a>
+                            </td>
+                            <td>{{ follower.full_name or '-' }}</td>
+                            <td>{{ follower.followers_count or 0 }}</td>
+                            <td class="email-cell">
+                                {% if follower.email %}
+                                    <a href="mailto:{{ follower.email }}" title="{{ follower.email }}">
+                                        {{ follower.email[:20] }}{% if follower.email|length > 20 %}...{% endif %}
+                                    </a>
+                                {% else %}
+                                    <span class="no-data">-</span>
+                                {% endif %}
+                            </td>
+                            <td class="status-cell">
+                                {% if follower.is_verified %}
+                                    <span class="badge badge-verified" title="Верифицирован">✓</span>
+                                {% endif %}
+                                {% if follower.is_business %}
+                                    <span class="badge badge-business" title="Бизнес">💼</span>
+                                {% endif %}
+                                {% if follower.is_private %}
+                                    <span class="badge badge-private" title="Приватный">🔒</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="score-bar" title="{{ follower.quality_score }}/100">
+                                    <div class="score-fill" style="width: {{ follower.quality_score }}%"></div>
+                                    <span class="score-value">{{ follower.quality_score }}</span>
+                                </div>
+                            </td>
+                            <td>
+                                <span class="source-tag">@{{ follower.source_account_username }}</span>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        
+        <!-- Пагинация -->
+        <div class="pagination">
+            {% if followers.has_prev %}
+                <a href="{{ url_for('followers_table', page=followers.prev_num, session_id=session_id, min_followers=request.args.get('min_followers', ''), has_email=request.args.get('has_email', ''), is_verified=request.args.get('is_verified', ''), is_business=request.args.get('is_business', ''), source_account=request.args.get('source_account', '')) }}" 
+                    class="btn btn-small">
+                    ← Назад
+                </a>
+            {% endif %}
+            
+            <span class="page-info">
+                Страница {{ followers.page }} из {{ followers.pages }}
+                ({{ followers.total }} записей)
+            </span>
+            
+            {% if followers.has_next %}
+                <a href="{{ url_for('followers_table', page=followers.next_num, session_id=session_id, min_followers=request.args.get('min_followers', ''), has_email=request.args.get('has_email', ''), is_verified=request.args.get('is_verified', ''), is_business=request.args.get('is_business', ''), source_account=request.args.get('source_account', '')) }}" 
+                    class="btn btn-small">
+                    Вперед →
+                </a>
+            {% endif %}
+        </div>
+    {% else %}
+        <div class="empty-state">
+            <h3>Подписчики не найдены</h3>
+            <p>Попробуйте изменить фильтры или <a href="{{ url_for('parse_competitors') }}">начните парсинг</a>.</p>
+        </div>
+    {% endif %}
+</div>
+{% endblock %}

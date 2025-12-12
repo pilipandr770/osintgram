@@ -1,0 +1,80 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}InstagramOSINT{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    {% block extra_css %}{% endblock %}
+</head>
+<body>
+    <nav class="navbar">
+        <div class="container">
+            <div class="navbar-brand">
+                <a href="{{ url_for('dashboard') if current_user.is_authenticated else url_for('auth.login') }}" class="logo">
+                    📸 InstagramOSINT
+                </a>
+            </div>
+            
+            <div class="navbar-menu">
+                {% if current_user.is_authenticated %}
+                    <a href="{{ url_for('dashboard') }}" class="nav-link {% if request.endpoint == 'dashboard' %}active{% endif %}">
+                        🏠 Дашборд
+                    </a>
+                    <a href="{{ url_for('manage_accounts') }}" class="nav-link {% if request.endpoint == 'manage_accounts' %}active{% endif %}">
+                        👤 Аккаунты
+                    </a>
+                    <a href="{{ url_for('parse_competitors') }}" class="nav-link {% if request.endpoint == 'parse_competitors' %}active{% endif %}">
+                        🔍 Парсинг
+                    </a>
+                    <a href="{{ url_for('followers_table') }}" class="nav-link {% if request.endpoint == 'followers_table' %}active{% endif %}">
+                        👥 Подписчики
+                    </a>
+                    <a href="{{ url_for('publish_content') }}" class="nav-link {% if request.endpoint == 'publish_content' %}active{% endif %}">
+                        📤 Публикация
+                    </a>
+                    <a href="{{ url_for('statistics') }}" class="nav-link {% if request.endpoint == 'statistics' %}active{% endif %}">
+                        📊 Статистика
+                    </a>
+                    <div class="nav-user">
+                        <span class="username">{{ current_user.username }}</span>
+                        <a href="{{ url_for('auth.logout') }}" class="nav-link logout">Выход</a>
+                    </div>
+                {% else %}
+                    <a href="{{ url_for('auth.login') }}" class="nav-link">Вход</a>
+                    <a href="{{ url_for('auth.register') }}" class="nav-link btn-primary">Регистрация</a>
+                {% endif %}
+            </div>
+            
+            <button class="navbar-toggle" onclick="toggleMobileMenu()">☰</button>
+        </div>
+    </nav>
+    
+    <main class="container main-content">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                <div class="alerts">
+                    {% for category, message in messages %}
+                        <div class="alert alert-{{ category }}">
+                            <span>{{ message }}</span>
+                            <button class="close-alert" onclick="this.parentElement.remove()">&times;</button>
+                        </div>
+                    {% endfor %}
+                </div>
+            {% endif %}
+        {% endwith %}
+        
+        {% block content %}{% endblock %}
+    </main>
+    
+    <footer class="footer">
+        <div class="container">
+            <p>&copy; 2024 InstagramOSINT. Профессиональный инструмент для сбора данных.</p>
+            <p class="footer-note">Используйте ответственно и в соответствии с законодательством.</p>
+        </div>
+    </footer>
+    
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+    {% block extra_js %}{% endblock %}
+</body>
+</html>
