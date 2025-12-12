@@ -1,12 +1,16 @@
 {% extends 'base.html' %}
 
-{% block title %}Сбор подписчиков{% endblock %}
+{% block title %}Аналіз аудиторії{% endblock %}
 
 {% block content %}
 <div class="parse-page">
     <div class="page-header">
-        <h1>🔍 Сбор подписчиков конкурентов</h1>
-        <p>Соберите данные подписчиков автоматически или импортируйте вручную</p>
+        <h1>📊 Аналіз аудиторії ринку</h1>
+        <p>Аналіз публічно доступних профілів для маркетингової стратегії</p>
+    </div>
+    
+    <div class="disclaimer-box" style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+        <p style="margin: 0; color: #856404;">⚠️ <strong>Важливо:</strong> Система працює лише з публічно доступними даними. Не використовується для масових дій, спаму або порушення правил Meta.</p>
     </div>
     
     <!-- Табы для переключения между режимами -->
@@ -19,15 +23,15 @@
         <!-- РУЧНОЙ ИМПОРТ -->
         <div id="manual-import" class="tab-content active">
             <div class="card">
-                <h3>📥 Импорт подписчиков из файла</h3>
-                <p class="text-muted">Загрузите CSV/TXT файл с username'ами или введите их вручную. Вход в Instagram не требуется!</p>
+                <h3>📥 Імпорт профілів з файлу</h3>
+                <p class="text-muted">Завантажте CSV/TXT файл з username'ами або введіть їх вручну. Вхід в Instagram не потрібен!</p>
                 
                 <form method="POST" action="{{ url_for('import_followers') }}" enctype="multipart/form-data" class="import-form">
                     <div class="form-group">
-                        <label for="source_account">Откуда эти подписчики? (имя конкурента)</label>
+                        <label for="source_account">Джерело даних (назва спільноти)</label>
                         <input type="text" id="source_account" name="source_account" 
-                            placeholder="@competitor_username" required>
-                        <small>Введите username аккаунта, откуда взяты подписчики</small>
+                            placeholder="@community_name" required>
+                        <small>Введіть username публічного акаунта</small>
                     </div>
                     
                     <div class="form-group">
@@ -59,7 +63,7 @@
                     </div>
                     
                     <button type="submit" class="btn btn-primary btn-large btn-block">
-                        📥 Импортировать подписчиков
+                        📥 Імпортувати профілі
                     </button>
                 </form>
             </div>
@@ -90,15 +94,15 @@
                     </div>
                     
                     <div class="form-group">
-                        <label for="competitor_usernames">Username конкурентов</label>
+                        <label for="competitor_usernames">Username публічних спільнот</label>
                         <textarea id="competitor_usernames" name="competitor_usernames" required 
-                            placeholder="@competitor1, @competitor2, @competitor3"
+                            placeholder="@community1, @community2, @community3"
                             rows="4"></textarea>
-                        <small>Введите username'ы через запятую (до 7 аккаунтов за раз)</small>
+                        <small>Введіть username'и через кому (до 7 акаунтів)</small>
                     </div>
-                    
+
                     <div class="form-group">
-                        <label for="max_followers">Максимум подписчиков с каждого аккаунта</label>
+                        <label for="max_followers">Максимум профілів з кожного акаунта</label>
                         <input type="number" id="max_followers" name="max_followers" 
                             value="1000" min="100" max="50000">
                         <small>Рекомендуем начинать с 1000 для быстрого теста</small>

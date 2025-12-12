@@ -9,8 +9,8 @@
 {% block content %}
 <div class="followers-page">
     <div class="page-header">
-        <h1>👥 Собранные подписчики</h1>
-        <p>Всего: <strong>{{ followers.total }}</strong> записей</p>
+        <h1>👥 Зібрана аудиторія</h1>
+        <p>Всього: <strong>{{ followers.total }}</strong> профілів</p>
     </div>
     
     <div class="filters-section">
@@ -21,7 +21,7 @@
             
             <div class="filters-row">
                 <div class="filter-group">
-                    <label for="min_followers">Минимум подписчиков</label>
+                    <label for="min_followers">Мінімум підписників</label>
                     <input type="number" id="min_followers" name="min_followers" 
                         value="{{ request.args.get('min_followers', '') }}" placeholder="0">
                 </div>

@@ -209,20 +209,20 @@ def create_app(config_name=None):
     @app.route('/parse', methods=['GET', 'POST'])
     @login_required
     def parse_competitors():
-        """Парсинг подписчиков конкурентов"""
+        """Аналіз публічно доступних профілів"""
         if request.method == 'POST':
             competitor_usernames_str = request.form.get('competitor_usernames', '')
             instagram_account_id = request.form.get('instagram_account_id')
             max_followers = int(request.form.get('max_followers', 10000))
             
-            # Парсим username'ы (разделяются запятыми)
+            # Парсимо username'и (розділяються комами)
             competitor_usernames = [
                 username.strip().lstrip('@') for username in competitor_usernames_str.split(',')
                 if username.strip()
             ]
             
             if not competitor_usernames:
-                flash('Введите хотя бы один username конкурента', 'error')
+                flash('Введіть хоча б один username спільноти', 'error')
                 return redirect(url_for('parse_competitors'))
             
             if not instagram_account_id:
@@ -271,9 +271,9 @@ def create_app(config_name=None):
                 
                 if failed_accounts:
                     failed_msg = ', '.join([f"@{k}: {v}" for k, v in failed_accounts.items()])
-                    flash(f'Некоторые аккаунты не удалось обработать: {failed_msg}', 'warning')
+                    flash(f'Деякі акаунти не вдалося обробити: {failed_msg}', 'warning')
                 
-                flash(f'Успешно собрано {total_collected} подписчиков!', 'success')
+                flash(f'✅ Зібрано {total_collected} профілів!', 'success')
                 return redirect(url_for('followers_table', session_id=parse_session.id))
             
             except Exception as e:
@@ -291,7 +291,7 @@ def create_app(config_name=None):
     @app.route('/import', methods=['POST'])
     @login_required
     def import_followers():
-        """Ручной импорт подписчиков из файла или текста (без авторизации Instagram)"""
+        """Імпорт публічних профілів з файлу або тексту"""
         source_account = request.form.get('source_account', '').strip().lstrip('@')
         manual_usernames = request.form.get('manual_usernames', '').strip()
         
@@ -300,7 +300,7 @@ def create_app(config_name=None):
         print(f"DEBUG: files = {request.files}")
         
         if not source_account:
-            flash('Укажите источник подписчиков (имя конкурента)', 'error')
+            flash('Вкажіть джерело даних (назва спільноти)', 'error')
             return redirect(url_for('parse_competitors'))
         
         usernames = []
@@ -380,17 +380,17 @@ def create_app(config_name=None):
         
         try:
             db.session.commit()
-            flash(f'✅ Импортировано {imported_count} подписчиков из @{source_account}. Пропущено дубликатов: {skipped_count}', 'success')
+            flash(f'✅ Імпортовано {imported_count} профілів з @{source_account}. Пропущено дублікатів: {skipped_count}', 'success')
             return redirect(url_for('followers_table', session_id=parse_session.id))
         except Exception as e:
             db.session.rollback()
-            flash(f'Ошибка сохранения: {str(e)}', 'error')
+            flash(f'Помилка збереження: {str(e)}', 'error')
             return redirect(url_for('parse_competitors'))
     
     @app.route('/followers')
     @login_required
     def followers_table():
-        """Таблица подписчиков с фильтрацией и пагинацией"""
+        """Таблиця аудиторії з фільтрацією та пагінацією"""
         session_id = request.args.get('session_id')
         page = request.args.get('page', 1, type=int)
         per_page = app.config.get('ITEMS_PER_PAGE', 50)
