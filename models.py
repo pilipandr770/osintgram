@@ -81,7 +81,7 @@ class InstagramAccount(db.Model):
     # Данные аккаунта
     instagram_username = db.Column(db.String(255), nullable=False)
     instagram_user_id = db.Column(db.String(255), unique=True)
-    instagram_password = db.Column(db.String(500), nullable=False)  # В production зашифровать!
+    instagram_password = db.Column(db.String(500), nullable=False)  # 🔐 Зашифровано Fernet
     
     # Информация профиля
     full_name = db.Column(db.String(255))
@@ -150,6 +150,17 @@ class Follower(db.Model):
     
     # Теги из биографии (для анализа)
     tags_from_bio = db.Column(db.JSON)  # ['#travel', '#photographer']
+    
+    # 🌍 ГЕОЛОКАЦІЯ
+    detected_city = db.Column(db.String(100), index=True)  # Місто з bio
+    detected_country = db.Column(db.String(100))
+    location_confidence = db.Column(db.String(20))  # high/medium/low/none
+    is_frankfurt_region = db.Column(db.Boolean, default=False, index=True)  # В радіусі 100км
+    
+    # 🎯 ІНТЕРЕСИ (ремонт/кафель)
+    matched_keywords = db.Column(db.JSON)  # ['fliesen', 'renovierung']
+    interest_score = db.Column(db.Integer, default=0)  # 0-100
+    is_target_audience = db.Column(db.Boolean, default=False, index=True)  # Цільова аудиторія
     
     # Исходные данные
     source_account_username = db.Column(db.String(255), nullable=False)  # чей подписчик

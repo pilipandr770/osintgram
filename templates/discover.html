@@ -1,0 +1,211 @@
+{% extends 'base.html' %}
+
+{% block title %}Автопошук акаунтів{% endblock %}
+
+{% block content %}
+<div class="discover-page">
+    <div class="page-header">
+        <h1>🔍 Автопошук схожих акаунтів</h1>
+        <p>Автоматичний пошук сторінок ремонту/кафелю в регіоні Франкфурта</p>
+    </div>
+    
+    <div class="disclaimer-box" style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
+        <p style="margin: 0; color: #856404;">⚠️ <strong>Важливо:</strong> Система працює лише з публічно доступними даними. Використовується для маркетингового аналізу ринку.</p>
+    </div>
+    
+    <div class="two-columns">
+        <!-- Форма пошуку -->
+        <div class="card">
+            <h3>🚀 Запустити автопошук</h3>
+            <p class="text-muted">Система знайде акаунти пов'язані з ремонтом та кафелем біля Франкфурта</p>
+            
+            <form method="POST" action="{{ url_for('discover_accounts') }}">
+                <div class="form-group">
+                    <label for="instagram_account_id">Оберіть акаунт для пошуку:</label>
+                    <select id="instagram_account_id" name="instagram_account_id" required>
+                        <option value="">-- Оберіть акаунт --</option>
+                        {% for account in accounts %}
+                            <option value="{{ account.id }}">
+                                @{{ account.instagram_username }}
+                            </option>
+                        {% endfor %}
+                    </select>
+                    {% if not accounts %}
+                        <div class="warning-box" style="margin-top: 10px;">
+                            <p>⚠️ Спочатку додайте Instagram акаунт</p>
+                            <a href="{{ url_for('manage_accounts') }}" class="btn btn-small btn-secondary">Додати акаунт</a>
+                        </div>
+                    {% endif %}
+                </div>
+                
+                <div class="info-box">
+                    <h4>🎯 Що шукаємо:</h4>
+                    <ul>
+                        <li><strong>Ключові слова:</strong> fliesen, fliesenleger, badsanierung, renovierung</li>
+                        <li><strong>Регіон:</strong> Frankfurt, Offenbach, Darmstadt, Mainz, Wiesbaden (+100 км)</li>
+                        <li><strong>Тип:</strong> Бізнес-акаунти, майстри, компанії</li>
+                    </ul>
+                </div>
+                
+                <button type="submit" class="btn btn-primary btn-large btn-block" {% if not accounts %}disabled{% endif %}>
+                    🔍 Знайти схожі акаунти
+                </button>
+            </form>
+        </div>
+        
+        <!-- Хештеги для пошуку -->
+        <div class="card">
+            <h3>📌 Хештеги для аналізу</h3>
+            <p class="text-muted">Система аналізує ці хештеги:</p>
+            
+            <div class="tags-list" style="display: flex; flex-wrap: wrap; gap: 8px; margin-top: 15px;">
+                {% for tag in hashtags %}
+                    <span class="tag-badge" style="background: #e1e8ed; padding: 5px 12px; border-radius: 15px; font-size: 14px;">
+                        #{{ tag }}
+                    </span>
+                {% endfor %}
+            </div>
+            
+            <div style="margin-top: 20px;">
+                <h4>🏙️ Міста в радіусі 100 км:</h4>
+                <p style="color: #666; font-size: 14px;">
+                    Frankfurt, Offenbach, Darmstadt, Mainz, Wiesbaden, Hanau, Aschaffenburg, 
+                    Bad Homburg, Rüsselsheim, Bensheim, Heidelberg, Mannheim, Worms...
+                </p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Результати пошуку -->
+    {% if discovered %}
+    <div class="card" style="margin-top: 30px;">
+        <h2>✅ Знайдені акаунти ({{ discovered|length }})</h2>
+        <p class="text-muted">Сортовано за релевантністю. Відмітьте акаунти для парсингу підписників.</p>
+        
+        <form method="POST" action="{{ url_for('parse_competitors') }}">
+            <input type="hidden" name="instagram_account_id" value="{{ accounts[0].id if accounts else '' }}">
+            
+            <div class="table-responsive">
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th><input type="checkbox" id="select-all" onclick="toggleAll(this)"></th>
+                            <th>Профіль</th>
+                            <th>Місто</th>
+                            <th>Ключові слова</th>
+                            <th>Score</th>
+                            <th>Рекомендація</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for acc in discovered %}
+                        <tr>
+                            <td>
+                                <input type="checkbox" name="selected_accounts" value="{{ acc.username }}" 
+                                    {% if acc.relevance_score >= 40 %}checked{% endif %}>
+                            </td>
+                            <td>
+                                <div style="display: flex; align-items: center; gap: 10px;">
+                                    {% if acc.profile_pic_url %}
+                                        <img src="{{ acc.profile_pic_url }}" alt="" style="width: 40px; height: 40px; border-radius: 50%;">
+                                    {% endif %}
+                                    <div>
+                                        <strong>@{{ acc.username }}</strong>
+                                        {% if acc.is_verified %}✓{% endif %}
+                                        {% if acc.is_business %}💼{% endif %}
+                                        <br>
+                                        <small style="color: #666;">{{ acc.full_name }}</small>
+                                    </div>
+                                </div>
+                            </td>
+                            <td>
+                                {% if acc.is_frankfurt_region %}
+                                    <span style="color: green;">📍 {{ acc.detected_city or 'Frankfurt Region' }}</span>
+                                {% else %}
+                                    <span style="color: #999;">—</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if acc.matched_keywords %}
+                                    {% for kw in acc.matched_keywords[:3] %}
+                                        <span class="keyword-tag" style="background: #e3f2fd; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-right: 4px;">{{ kw }}</span>
+                                    {% endfor %}
+                                {% else %}
+                                    <span style="color: #999;">—</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                <div class="score-bar" style="width: 60px; background: #eee; border-radius: 3px; height: 8px;">
+                                    <div style="width: {{ acc.relevance_score }}%; background: {% if acc.relevance_score >= 60 %}#28a745{% elif acc.relevance_score >= 40 %}#ffc107{% else %}#dc3545{% endif %}; height: 100%; border-radius: 3px;"></div>
+                                </div>
+                                <small>{{ acc.relevance_score }}/100</small>
+                            </td>
+                            <td>
+                                <span style="font-size: 13px;">{{ acc.recommendation }}</span>
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            
+            <div style="margin-top: 20px; display: flex; gap: 15px;">
+                <button type="submit" class="btn btn-primary">
+                    📥 Зібрати аудиторію з обраних акаунтів
+                </button>
+                <button type="button" class="btn btn-secondary" onclick="copyUsernames()">
+                    📋 Копіювати username'и
+                </button>
+            </div>
+        </form>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function toggleAll(source) {
+    const checkboxes = document.querySelectorAll('input[name="selected_accounts"]');
+    checkboxes.forEach(cb => cb.checked = source.checked);
+}
+
+function copyUsernames() {
+    const checked = document.querySelectorAll('input[name="selected_accounts"]:checked');
+    const usernames = Array.from(checked).map(cb => cb.value).join(', ');
+    navigator.clipboard.writeText(usernames).then(() => {
+        alert('Скопійовано: ' + usernames);
+    });
+}
+</script>
+
+<style>
+.discover-page .two-columns {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+@media (max-width: 768px) {
+    .discover-page .two-columns {
+        grid-template-columns: 1fr;
+    }
+}
+.table-responsive {
+    overflow-x: auto;
+}
+.table {
+    width: 100%;
+    border-collapse: collapse;
+}
+.table th, .table td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #eee;
+}
+.table th {
+    background: #f8f9fa;
+    font-weight: 600;
+}
+.table tr:hover {
+    background: #f8f9fa;
+}
+</style>
+{% endblock %}

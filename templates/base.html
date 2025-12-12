@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="ru">
+<html lang="uk">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -22,27 +22,30 @@
                         🏠 Дашборд
                     </a>
                     <a href="{{ url_for('manage_accounts') }}" class="nav-link {% if request.endpoint == 'manage_accounts' %}active{% endif %}">
-                        👤 Аккаунты
+                        👤 Акаунти
+                    </a>
+                    <a href="{{ url_for('discover_accounts') }}" class="nav-link {% if request.endpoint == 'discover_accounts' %}active{% endif %}">
+                        🔍 Автопошук
                     </a>
                     <a href="{{ url_for('parse_competitors') }}" class="nav-link {% if request.endpoint == 'parse_competitors' %}active{% endif %}">
-                        � Аналіз ринку
+                        📊 Аналіз ринку
                     </a>
                     <a href="{{ url_for('followers_table') }}" class="nav-link {% if request.endpoint == 'followers_table' %}active{% endif %}">
                         👥 Аудиторія
                     </a>
                     <a href="{{ url_for('publish_content') }}" class="nav-link {% if request.endpoint == 'publish_content' %}active{% endif %}">
-                        📤 Публикация
+                        📤 Публікація
                     </a>
                     <a href="{{ url_for('statistics') }}" class="nav-link {% if request.endpoint == 'statistics' %}active{% endif %}">
-                        📊 Статистика
+                        📈 Статистика
                     </a>
                     <div class="nav-user">
                         <span class="username">{{ current_user.username }}</span>
-                        <a href="{{ url_for('auth.logout') }}" class="nav-link logout">Выход</a>
+                        <a href="{{ url_for('auth.logout') }}" class="nav-link logout">Вихід</a>
                     </div>
                 {% else %}
-                    <a href="{{ url_for('auth.login') }}" class="nav-link">Вход</a>
-                    <a href="{{ url_for('auth.register') }}" class="nav-link btn-primary">Регистрация</a>
+                    <a href="{{ url_for('auth.login') }}" class="nav-link">Вхід</a>
+                    <a href="{{ url_for('auth.register') }}" class="nav-link btn-primary">Реєстрація</a>
                 {% endif %}
             </div>
             

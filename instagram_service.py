@@ -524,3 +524,162 @@ class InstagramService:
             score += 10
         
         return min(score, 100)
+    
+    # ============ АВТОПОШУК СХОЖИХ СТОРІНОК ============
+    
+    def search_accounts_by_hashtag(self, hashtag: str, max_posts: int = 50) -> List[Dict]:
+        """
+        Пошук акаунтів за хештегом (аналіз авторів постів).
+        
+        Args:
+            hashtag: хештег для пошуку (без #)
+            max_posts: максимальна кількість постів для аналізу
+            
+        Returns:
+            List[Dict]: список унікальних акаунтів
+        """
+        try:
+            hashtag = hashtag.lstrip('#').strip()
+            print(f"🔍 Пошук акаунтів по хештегу #{hashtag}...")
+            
+            # Отримуємо пости за хештегом
+            medias = self.client.hashtag_medias_recent(hashtag, amount=max_posts)
+            
+            accounts = {}
+            for media in medias:
+                user = media.user
+                if str(user.pk) not in accounts:
+                    accounts[str(user.pk)] = {
+                        'user_id': str(user.pk),
+                        'username': user.username,
+                        'full_name': getattr(user, 'full_name', ''),
+                        'is_verified': getattr(user, 'is_verified', False),
+                        'is_business': getattr(user, 'is_business', False),
+                        'profile_pic_url': str(user.profile_pic_url) if user.profile_pic_url else '',
+                        'source_hashtag': hashtag
+                    }
+            
+            print(f"✅ Знайдено {len(accounts)} унікальних акаунтів по #{hashtag}")
+            return list(accounts.values())
+            
+        except Exception as e:
+            print(f"❌ Помилка пошуку по хештегу #{hashtag}: {e}")
+            return []
+    
+    def search_accounts_by_keyword(self, keyword: str, max_results: int = 20) -> List[Dict]:
+        """
+        Пошук акаунтів за ключовим словом через Instagram Search.
+        
+        Args:
+            keyword: ключове слово для пошуку
+            max_results: максимальна кількість результатів
+            
+        Returns:
+            List[Dict]: список акаунтів
+        """
+        try:
+            print(f"🔍 Пошук акаунтів по ключовому слову: {keyword}...")
+            
+            # Пошук користувачів
+            users = self.client.search_users(keyword, amount=max_results)
+            
+            accounts = []
+            for user in users:
+                accounts.append({
+                    'user_id': str(user.pk),
+                    'username': user.username,
+                    'full_name': user.full_name or '',
+                    'is_verified': getattr(user, 'is_verified', False),
+                    'is_business': getattr(user, 'is_business', False),
+                    'profile_pic_url': str(user.profile_pic_url) if user.profile_pic_url else '',
+                    'source_keyword': keyword
+                })
+            
+            print(f"✅ Знайдено {len(accounts)} акаунтів по '{keyword}'")
+            return accounts
+            
+        except Exception as e:
+            print(f"❌ Помилка пошуку по ключовому слову '{keyword}': {e}")
+            return []
+    
+    def discover_similar_accounts(self, seed_usernames: List[str] = None) -> List[Dict]:
+        """
+        Автоматичний пошук схожих акаунтів (ремонт/кафель біля Франкфурта).
+        Комбінує пошук по хештегах та ключових словах.
+        
+        Args:
+            seed_usernames: початкові username'и для аналізу (опціонально)
+            
+        Returns:
+            List[Dict]: список знайдених акаунтів з оцінкою релевантності
+        """
+        from geo_search import (
+            HASHTAGS_SEARCH, 
+            get_suggested_accounts_keywords,
+            analyze_profile_relevance
+        )
+        
+        all_accounts = {}
+        
+        # 1. Пошук по хештегах (кафель + регіон)
+        priority_hashtags = [
+            'fliesenleger', 'fliesen', 'badsanierung',
+            'frankfurtammain', 'renovierung', 'handwerker'
+        ]
+        
+        for hashtag in priority_hashtags[:6]:  # Лімітуємо запити
+            try:
+                accounts = self.search_accounts_by_hashtag(hashtag, max_posts=30)
+                for acc in accounts:
+                    if acc['username'] not in all_accounts:
+                        all_accounts[acc['username']] = acc
+            except Exception as e:
+                print(f"⚠️ Пропускаємо хештег #{hashtag}: {e}")
+        
+        # 2. Пошук по ключових словах
+        keywords = [
+            'fliesenleger frankfurt',
+            'badsanierung frankfurt', 
+            'renovierung frankfurt',
+            'fliesen rhein-main'
+        ]
+        
+        for keyword in keywords[:4]:
+            try:
+                accounts = self.search_accounts_by_keyword(keyword, max_results=15)
+                for acc in accounts:
+                    if acc['username'] not in all_accounts:
+                        all_accounts[acc['username']] = acc
+            except Exception as e:
+                print(f"⚠️ Пропускаємо ключове слово '{keyword}': {e}")
+        
+        # 3. Отримуємо детальну інформацію та оцінюємо релевантність
+        enriched_accounts = []
+        for username, acc_data in list(all_accounts.items())[:50]:  # Лімітуємо
+            try:
+                user_info = self.get_user_info_by_username(username)
+                if user_info:
+                    # Аналіз релевантності
+                    relevance = analyze_profile_relevance(
+                        username=username,
+                        bio=user_info.get('biography', ''),
+                        followers_count=user_info.get('followers_count', 0)
+                    )
+                    
+                    enriched_accounts.append({
+                        **user_info,
+                        'relevance_score': relevance['total_score'],
+                        'is_frankfurt_region': relevance['location_match']['matched'],
+                        'detected_city': relevance['location_match']['city'],
+                        'is_target_audience': relevance['interest_match']['matched'],
+                        'matched_keywords': relevance['interest_match']['keywords'],
+                        'recommendation': relevance['recommendation']
+                    })
+            except Exception as e:
+                print(f"⚠️ Помилка збагачення {username}: {e}")
+        
+        # Сортуємо за релевантністю
+        enriched_accounts.sort(key=lambda x: x.get('relevance_score', 0), reverse=True)
+        
+        print(f"✅ Знайдено та проаналізовано {len(enriched_accounts)} потенційних акаунтів")
+        return enriched_accounts

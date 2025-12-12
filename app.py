@@ -9,6 +9,8 @@ from config import config
 from database import db, init_db
 from models import User, InstagramAccount, Follower, ParseSession, PublishedContent, ExportHistory
 from instagram_service import InstagramService
+from encryption import encrypt_password, decrypt_password
+from geo_search import analyze_profile_relevance, HASHTAGS_SEARCH
 from auth import auth_bp
 import os
 from datetime import datetime
@@ -153,10 +155,13 @@ def create_app(config_name=None):
             
             # Сохранить аккаунт
             try:
+                # 🔐 Шифруємо пароль перед збереженням
+                encrypted_pwd = encrypt_password(password)
+                
                 instagram_account = InstagramAccount(
                     user_id=current_user.id,
                     instagram_username=username,
-                    instagram_password=password,  # TODO: зашифровать!
+                    instagram_password=encrypted_pwd,  # 🔐 Зашифровано!
                     instagram_user_id=account_info.get('user_id'),
                     full_name=account_info.get('full_name'),
                     biography=account_info.get('biography'),
@@ -251,7 +256,9 @@ def create_app(config_name=None):
             
             # Начать парсинг
             try:
-                service = InstagramService(account.instagram_username, account.instagram_password)
+                # 🔐 Розшифровуємо пароль
+                decrypted_pwd = decrypt_password(account.instagram_password)
+                service = InstagramService(account.instagram_username, decrypted_pwd)
                 success, message = service.login()
                 
                 if not success:
@@ -287,6 +294,61 @@ def create_app(config_name=None):
         # GET - форма для парсинга
         accounts = InstagramAccount.query.filter_by(user_id=current_user.id).all()
         return render_template('parse_competitors.html', accounts=accounts)
+    
+    @app.route('/discover', methods=['GET', 'POST'])
+    @login_required
+    def discover_accounts():
+        """🔍 Автоматичний пошук схожих сторінок (ремонт/кафель біля Франкфурта)"""
+        if request.method == 'POST':
+            instagram_account_id = request.form.get('instagram_account_id')
+            
+            if not instagram_account_id:
+                flash('Оберіть Instagram акаунт для пошуку', 'error')
+                return redirect(url_for('discover_accounts'))
+            
+            account = InstagramAccount.query.filter_by(
+                id=instagram_account_id,
+                user_id=current_user.id
+            ).first()
+            
+            if not account:
+                flash('Instagram акаунт не знайдено', 'error')
+                return redirect(url_for('discover_accounts'))
+            
+            try:
+                # 🔐 Розшифровуємо пароль
+                decrypted_pwd = decrypt_password(account.instagram_password)
+                service = InstagramService(account.instagram_username, decrypted_pwd)
+                success, message = service.login()
+                
+                if not success:
+                    flash(f'Помилка входу: {message}', 'error')
+                    return redirect(url_for('discover_accounts'))
+                
+                # 🔍 Пошук схожих акаунтів
+                flash('🔍 Шукаємо схожі акаунти... Це може зайняти 1-2 хвилини', 'info')
+                discovered = service.discover_similar_accounts()
+                
+                # Зберігаємо в сесії для відображення
+                from flask import session as flask_session
+                flask_session['discovered_accounts'] = discovered[:30]  # Топ-30
+                
+                flash(f'✅ Знайдено {len(discovered)} потенційних акаунтів!', 'success')
+                return redirect(url_for('discover_accounts'))
+                
+            except Exception as e:
+                flash(f'Помилка пошуку: {str(e)}', 'error')
+                return redirect(url_for('discover_accounts'))
+        
+        # GET - показати форму та результати
+        from flask import session as flask_session
+        discovered = flask_session.get('discovered_accounts', [])
+        accounts = InstagramAccount.query.filter_by(user_id=current_user.id).all()
+        
+        return render_template('discover.html', 
+                               accounts=accounts, 
+                               discovered=discovered,
+                               hashtags=HASHTAGS_SEARCH[:10])
     
     @app.route('/import', methods=['POST'])
     @login_required
@@ -614,7 +676,9 @@ def create_app(config_name=None):
                 return redirect(url_for('publish_content'))
             
             try:
-                service = InstagramService(account.instagram_username, account.instagram_password)
+                # 🔐 Розшифровуємо пароль
+                decrypted_pwd = decrypt_password(account.instagram_password)
+                service = InstagramService(account.instagram_username, decrypted_pwd)
                 success, login_msg = service.login()
                 
                 if not success:
