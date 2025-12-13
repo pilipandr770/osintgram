@@ -33,6 +33,12 @@
                     <a href="{{ url_for('followers_table') }}" class="nav-link {% if request.endpoint == 'followers_table' %}active{% endif %}">
                         👥 Аудиторія
                     </a>
+                    <a href="{{ url_for('messaging') }}" class="nav-link {% if request.endpoint == 'messaging' %}active{% endif %}">
+                        📨 Розсилка
+                    </a>
+                    <a href="{{ url_for('ai_assistant') }}" class="nav-link {% if request.endpoint == 'ai_assistant' %}active{% endif %}">
+                        🤖 AI
+                    </a>
                     <a href="{{ url_for('publish_content') }}" class="nav-link {% if request.endpoint == 'publish_content' %}active{% endif %}">
                         📤 Публікація
                     </a>

@@ -49,7 +49,7 @@ pip install -r requirements.txt
 
 ### 4. Настройте переменные окружения
 
-Создайте файл `.env` на основе примера:
+Создайте файл `.env` на основе примера `.env.example`:
 
 ```env
 FLASK_APP=app.py
@@ -58,6 +58,14 @@ SECRET_KEY=your-super-secret-key-here
 
 # PostgreSQL
 DATABASE_URL=postgresql://username:password@localhost:5432/instagram_osint_db
+
+# OpenAI (опционально)
+OPENAI_API_KEY=
+
+# RSS ленты (опционально). JSON-строка:
+# - словарь: {"dezeen": {"url": "https://...", "name": "..."}, ...}
+# - или список URL: ["https://example.com/feed.xml", "https://example.com/rss"]
+RSS_FEEDS_JSON=
 ```
 
 ### 5. Создайте базу данных

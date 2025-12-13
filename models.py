@@ -278,3 +278,202 @@ class ExportHistory(db.Model):
     
     def __repr__(self):
         return f'<ExportHistory {self.id}>'
+
+
+# ============ MESSAGE LOG TABLE ============
+
+class MessageLog(db.Model):
+    """Лог відправлених повідомлень в Direct"""
+    __tablename__ = 'message_logs'
+    __table_args__ = {'schema': SCHEMA_NAME}
+    
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), nullable=False, index=True)
+    
+    # Акаунт відправника
+    account_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.instagram_accounts.id'))
+    account_username = db.Column(db.String(255))
+    
+    # Статистика розсилки
+    total_sent = db.Column(db.Integer, default=0)
+    successful = db.Column(db.Integer, default=0)
+    failed = db.Column(db.Integer, default=0)
+    
+    # Деталі
+    message_template = db.Column(db.Text)
+    audience_type = db.Column(db.String(50))  # target, frankfurt, all
+    status = db.Column(db.String(50), default='pending')  # pending, running, completed, stopped, error
+    error_message = db.Column(db.Text)
+    
+    # Дати
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    completed_at = db.Column(db.DateTime)
+    
+    def __repr__(self):
+        return f'<MessageLog {self.id}>'
+
+
+class SentMessage(db.Model):
+    """Окремі відправлені повідомлення"""
+    __tablename__ = 'sent_messages'
+    __table_args__ = {'schema': SCHEMA_NAME}
+    
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), nullable=False, index=True)
+    message_log_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.message_logs.id'), index=True)
+    
+    # Отримувач
+    recipient_username = db.Column(db.String(255), nullable=False, index=True)
+    recipient_user_id = db.Column(db.String(255))
+    
+    # Статус
+    status = db.Column(db.String(50), default='sent')  # sent, delivered, read, failed
+    error_message = db.Column(db.Text)
+    
+    # Дати
+    sent_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    
+    def __repr__(self):
+        return f'<SentMessage to {self.recipient_username}>'
+
+
+# ============ CONTENT PIPELINE TABLES ============
+
+class RssTrend(db.Model):
+    """Збережені тренди з RSS"""
+    __tablename__ = 'rss_trends'
+    __table_args__ = (
+        db.Index('idx_rss_trends_user', 'user_id'),
+        db.Index('idx_rss_trends_fetched', 'fetched_at'),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), index=True)
+
+    title = db.Column(db.String(500), nullable=False)
+    content = db.Column(db.Text)
+    link = db.Column(db.String(1000))
+    source = db.Column(db.String(100))
+    category = db.Column(db.String(50))
+    language = db.Column(db.String(10))
+    image_url = db.Column(db.String(1000))
+
+    matched_keywords = db.Column(db.JSON)
+    relevance_score = db.Column(db.Integer, default=0)
+
+    published_at = db.Column(db.DateTime)
+    fetched_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f'<RssTrend {self.source}: {self.title[:50]}>'
+
+
+class ContentIdea(db.Model):
+    """Ідеї контенту на основі трендів/AI"""
+    __tablename__ = 'content_ideas'
+    __table_args__ = (
+        db.Index('idx_content_ideas_user', 'user_id'),
+        db.Index('idx_content_ideas_status', 'status'),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), index=True)
+    trend_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.rss_trends.id'))
+
+    title = db.Column(db.String(500))
+    caption = db.Column(db.Text)
+    hashtags = db.Column(db.JSON)
+    content_type = db.Column(db.String(50))
+    image_prompt = db.Column(db.Text)
+    generated_image_url = db.Column(db.String(1000))
+    video_url = db.Column(db.String(1000))
+
+    status = db.Column(db.String(50), default='draft')
+    scheduled_at = db.Column(db.DateTime)
+    published_at = db.Column(db.DateTime)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f'<ContentIdea {self.id}>'
+
+
+class GeneratedMedia(db.Model):
+    """Згенеровані медіа-файли (зображення/відео)"""
+    __tablename__ = 'generated_media'
+    __table_args__ = (
+        db.Index('idx_generated_media_user', 'user_id'),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), index=True)
+    content_idea_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.content_ideas.id'))
+
+    media_type = db.Column(db.String(50))
+    prompt = db.Column(db.Text)
+    provider = db.Column(db.String(50))
+    source_url = db.Column(db.String(1000))
+    local_path = db.Column(db.String(500))
+    thumbnail_url = db.Column(db.String(1000))
+
+    width = db.Column(db.Integer)
+    height = db.Column(db.Integer)
+    duration_seconds = db.Column(db.Integer)
+
+    status = db.Column(db.String(50), default='pending')
+    error_message = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    def __repr__(self):
+        return f'<GeneratedMedia {self.media_type} {self.status}>'
+
+
+# ============ AUTOMATION SETTINGS / AI CACHE ============
+
+class AutomationSettings(db.Model):
+    """Налаштування автоматизації (RSS → чернетки → публікації)."""
+    __tablename__ = 'automation_settings'
+    __table_args__ = (
+        db.Index('idx_automation_settings_user', 'user_id', unique=True),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), nullable=False)
+
+    enabled = db.Column(db.Boolean, default=False)
+    rss_check_interval_minutes = db.Column(db.Integer, default=240)  # 4h
+    publish_times = db.Column(db.JSON)  # ["09:00", "13:00", "18:00"]
+    timezone = db.Column(db.String(64), default='Europe/Berlin')
+    max_posts_per_day = db.Column(db.Integer, default=2)
+    auto_publish = db.Column(db.Boolean, default=False)
+    use_animation = db.Column(db.Boolean, default=False)
+
+    # Animation / music
+    music_file_path = db.Column(db.Text)
+    animation_duration_seconds = db.Column(db.Integer, default=8)
+    animation_fps = db.Column(db.Integer, default=30)
+
+    last_rss_check_at = db.Column(db.DateTime)
+    last_publish_run_at = db.Column(db.DateTime)
+    last_error = db.Column(db.Text)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class AiCache(db.Model):
+    """Зберігає останні результати AI (щоб не класти великі об'єкти в cookie-session)."""
+    __tablename__ = 'ai_cache'
+    __table_args__ = (
+        db.Index('idx_ai_cache_user_kind', 'user_id', 'kind'),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), nullable=False, index=True)
+    kind = db.Column(db.String(50), nullable=False)  # analysis|message|content
+    payload = db.Column(db.JSON)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)

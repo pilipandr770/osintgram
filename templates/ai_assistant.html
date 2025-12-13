@@ -1,0 +1,396 @@
+{% extends "base.html" %}
+
+{% block title %}🤖 AI Асистент{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>🤖 AI Асистент</h1>
+    
+    <!-- Статус AI -->
+    <div class="card" style="background: {% if ai_available %}#e8f5e9{% else %}#fff3e0{% endif %}; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+        {% if ai_available %}
+        <p>✅ <strong>OpenAI підключено!</strong> Всі AI функції доступні.</p>
+        {% else %}
+        <p>⚠️ <strong>OpenAI не налаштовано.</strong> Додайте OPENAI_API_KEY в .env файл.</p>
+        <code>OPENAI_API_KEY=sk-your-key-here</code>
+        {% endif %}
+    </div>
+    
+    <!-- Tabs -->
+    <div class="tabs" style="display: flex; gap: 10px; margin-bottom: 20px;">
+        <button class="tab-btn" data-tab="analyze" onclick="showTab('analyze', this)" style="padding: 10px 20px; border: none; background: #e0e0e0; border-radius: 6px; cursor: pointer;">
+            🔍 Аналіз профілів
+        </button>
+        <button class="tab-btn" data-tab="generate" onclick="showTab('generate', this)" style="padding: 10px 20px; border: none; background: #e0e0e0; border-radius: 6px; cursor: pointer;">
+            ✍️ Генерація повідомлень
+        </button>
+        <button class="tab-btn" data-tab="content" onclick="showTab('content', this)" style="padding: 10px 20px; border: none; background: #e0e0e0; border-radius: 6px; cursor: pointer;">
+            📝 Контент для постів
+        </button>
+        <button class="tab-btn" data-tab="trends" onclick="showTab('trends', this)" style="padding: 10px 20px; border: none; background: #e0e0e0; border-radius: 6px; cursor: pointer;">
+            📰 Тренди (RSS)
+        </button>
+    </div>
+    
+    <!-- Tab: Аналіз профілів -->
+    <div id="tab-analyze" class="tab-content" style="{% if active_tab != 'analyze' %}display: none;{% endif %}">
+        <div class="card" style="background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+            <h2>🔍 AI Аналіз профілів</h2>
+            <p>Автоматичний аналіз профілів для визначення цільової аудиторії.</p>
+            
+            <form method="POST" action="{{ url_for('ai_analyze_profiles') }}">
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label><strong>Кількість профілів для аналізу:</strong></label>
+                    <input type="number" name="limit" value="20" min="1" max="100" 
+                           style="padding: 10px; border: 1px solid #ddd; border-radius: 6px; width: 100px;">
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label><strong>Фільтр:</strong></label>
+                    <select name="filter" style="padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                        <option value="unanalyzed">Тільки неаналізовані</option>
+                        <option value="all">Всі профілі</option>
+                        <option value="low_score">З низьким рейтингом</option>
+                    </select>
+                </div>
+                
+                <button type="submit" class="btn-primary" 
+                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 25px; border: none; border-radius: 8px; cursor: pointer;">
+                    🚀 Запустити AI аналіз
+                </button>
+            </form>
+            
+            {% if analysis_results %}
+            <div style="margin-top: 20px;">
+                <h3>📊 Результати аналізу:</h3>
+                <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                    <thead>
+                        <tr style="background: #f5f5f5;">
+                            <th style="padding: 10px; text-align: left;">Username</th>
+                            <th style="padding: 10px; text-align: center;">Тип</th>
+                            <th style="padding: 10px; text-align: center;">Score</th>
+                            <th style="padding: 10px; text-align: left;">Рекомендація</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for result in analysis_results %}
+                        <tr>
+                            <td style="padding: 10px;">@{{ result.username }}</td>
+                            <td style="padding: 10px; text-align: center;">{{ result.ai_analysis.profile_type }}</td>
+                            <td style="padding: 10px; text-align: center;">
+                                <span style="background: {% if result.ai_analysis.quality_score >= 70 %}#4caf50{% elif result.ai_analysis.quality_score >= 40 %}#ff9800{% else %}#f44336{% endif %}; color: white; padding: 3px 8px; border-radius: 10px;">
+                                    {{ result.ai_analysis.quality_score }}
+                                </span>
+                            </td>
+                            <td style="padding: 10px;">{{ result.ai_analysis.contact_recommendation }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Tab: Генерація повідомлень -->
+    <div id="tab-generate" class="tab-content" style="{% if active_tab != 'generate' %}display: none;{% endif %}">
+        <div class="card" style="background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+            <h2>✍️ Генерація персоналізованих повідомлень</h2>
+            
+            <form method="POST" action="{{ url_for('ai_generate_message') }}">
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label><strong>Username отримувача:</strong></label>
+                    <input type="text" name="username" placeholder="@username" 
+                           style="padding: 10px; border: 1px solid #ddd; border-radius: 6px; width: 200px;">
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label><strong>Біографія (якщо відома):</strong></label>
+                    <textarea name="bio" rows="2" placeholder="Біографія профілю..."
+                              style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;"></textarea>
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label><strong>Мета повідомлення:</strong></label>
+                    <select name="goal" style="padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                        <option value="знайомство">👋 Перше знайомство</option>
+                        <option value="пропозиція">💼 Пропозиція послуг</option>
+                        <option value="знижка">🎁 Спеціальна пропозиція</option>
+                        <option value="follow_up">🔄 Повторний контакт</option>
+                    </select>
+                </div>
+                
+                <button type="submit" class="btn-primary"
+                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 25px; border: none; border-radius: 8px; cursor: pointer;">
+                    ✨ Згенерувати повідомлення
+                </button>
+            </form>
+            
+            {% if generated_messages %}
+            <div style="margin-top: 20px;">
+                <h3>💬 Варіанти повідомлень:</h3>
+                {% for msg in generated_messages.messages %}
+                <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; margin-top: 10px;">
+                    <p>{{ msg }}</p>
+                    <button onclick="copyMessage(this)" style="margin-top: 10px; padding: 5px 15px; background: #667eea; color: white; border: none; border-radius: 4px; cursor: pointer;">
+                        📋 Копіювати
+                    </button>
+                </div>
+                {% endfor %}
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Tab: Контент для постів -->
+    <div id="tab-content" class="tab-content" style="{% if active_tab != 'content' %}display: none;{% endif %}">
+        <div class="card" style="background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+            <h2>📝 Генерація контенту для Instagram</h2>
+            
+            <form method="POST" action="{{ url_for('ai_generate_content') }}">
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label><strong>Тема поста:</strong></label>
+                    <input type="text" name="topic" placeholder="Наприклад: тренди плитки 2025, поради ремонту ванної..."
+                           style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                </div>
+                
+                <div class="form-group" style="margin-bottom: 15px;">
+                    <label><strong>Тип контенту:</strong></label>
+                    <select name="post_type" style="padding: 10px; border: 1px solid #ddd; border-radius: 6px;">
+                        <option value="informative">📚 Інформативний</option>
+                        <option value="promotional">📢 Рекламний</option>
+                        <option value="tips">💡 Поради</option>
+                        <option value="behind_scenes">🎬 За лаштунками</option>
+                        <option value="before_after">🔄 До/Після</option>
+                        <option value="trend">🔥 Тренд</option>
+                    </select>
+                </div>
+                
+                <button type="submit" class="btn-primary"
+                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 25px; border: none; border-radius: 8px; cursor: pointer;">
+                    ✨ Згенерувати контент
+                </button>
+            </form>
+            
+            {% if generated_content %}
+            <div style="margin-top: 20px;">
+                <h3>📱 Згенерований контент:</h3>
+                
+                <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin-top: 10px;">
+                    <h4>🎯 Hook (перший рядок):</h4>
+                    <p style="font-weight: bold; font-size: 1.1em;">{{ generated_content.hook }}</p>
+                    
+                    <h4 style="margin-top: 15px;">📝 Повний текст:</h4>
+                    <p style="white-space: pre-line;">{{ generated_content.caption }}</p>
+                    
+                    <h4 style="margin-top: 15px;">🏷️ Хештеги:</h4>
+                    <p style="color: #1976d2;">{{ generated_content.hashtags | join(' ') }}</p>
+                    
+                    {% if generated_content.content_ideas %}
+                    <h4 style="margin-top: 15px;">📸 Ідеї для фото:</h4>
+                    <ul>
+                        {% for idea in generated_content.content_ideas %}
+                        <li>{{ idea }}</li>
+                        {% endfor %}
+                    </ul>
+                    {% endif %}
+                    
+                    <button onclick="copyContent()" style="margin-top: 15px; padding: 10px 20px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                        📋 Копіювати все
+                    </button>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    
+    <!-- Tab: Тренди -->
+    <div id="tab-trends" class="tab-content" style="{% if active_tab != 'trends' %}display: none;{% endif %}">
+        <div class="card" style="background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+            <h2>📰 Тренди з RSS (дизайн, плитка, ремонт)</h2>
+
+            <div style="background: #f7f7ff; padding: 15px; border-radius: 10px; margin: 15px 0 20px 0;">
+                <h3 style="margin-top: 0;">⚙️ Автоматизація</h3>
+                <form method="POST" action="{{ url_for('ai_update_automation_settings') }}" enctype="multipart/form-data" style="display: grid; gap: 10px;">
+                    <label style="display:flex; gap:10px; align-items:center;">
+                        <input type="checkbox" name="enabled" {% if automation_settings and automation_settings.enabled %}checked{% endif %}>
+                        <span><strong>Увімкнути</strong> регулярну перевірку RSS та підготовку чернеток</span>
+                    </label>
+
+                    <label style="display:flex; gap:10px; align-items:center;">
+                        <input type="checkbox" name="auto_publish" {% if automation_settings and automation_settings.auto_publish %}checked{% endif %}>
+                        <span><strong>Авто-публікація</strong> за розкладом (потребує валідного входу в Instagram)</span>
+                    </label>
+
+                    <label style="display:flex; gap:10px; align-items:center;">
+                        <input type="checkbox" name="use_animation" {% if automation_settings and automation_settings.use_animation %}checked{% endif %}>
+                        <span>Анімація фото → відео (Reel)</span>
+                    </label>
+
+                    <div style="display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end;">
+                        <div>
+                            <label><strong>Довжина анімації (сек):</strong></label><br>
+                            <input type="number" name="animation_duration_seconds" min="3" max="60"
+                                   value="{{ automation_settings.animation_duration_seconds if automation_settings and automation_settings.animation_duration_seconds else 8 }}"
+                                   style="padding: 8px; border: 1px solid #ddd; border-radius: 6px; width: 120px;">
+                        </div>
+
+                        <div>
+                            <label><strong>Музика (файл):</strong></label><br>
+                            <input type="file" name="music_file" accept="audio/mpeg,audio/mp3,audio/wav,audio/x-wav,audio/mp4,audio/aac,audio/x-m4a"
+                                   style="padding: 8px; border: 1px solid #ddd; border-radius: 6px; width: 320px; background: white;">
+                            {% if automation_settings and automation_settings.music_file_path %}
+                            <div style="color:#666; margin-top: 4px; font-size: 0.9em;">
+                                Поточний файл: <code>{{ automation_settings.music_file_path }}</code>
+                            </div>
+                            {% endif %}
+                            <div style="color:#666; margin-top: 4px; font-size: 0.9em;">
+                                Якщо музика коротша — зациклиться; якщо довша — обріжеться під довжину відео.
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style="display:flex; gap:10px; flex-wrap:wrap;">
+                        <div>
+                            <label><strong>Перевірка RSS (хв):</strong></label><br>
+                            <input type="number" name="rss_check_interval_minutes" min="15" max="1440"
+                                   value="{{ automation_settings.rss_check_interval_minutes if automation_settings else 240 }}"
+                                   style="padding: 8px; border: 1px solid #ddd; border-radius: 6px; width: 120px;">
+                        </div>
+
+                        <div>
+                            <label><strong>Час публікацій (HH:MM, через кому):</strong></label><br>
+                            <input type="text" name="publish_times"
+                                   value="{{ (automation_settings.publish_times | join(', ')) if automation_settings and automation_settings.publish_times else '09:00, 18:00' }}"
+                                   style="padding: 8px; border: 1px solid #ddd; border-radius: 6px; width: 260px;">
+                        </div>
+
+                        <div>
+                            <label><strong>Таймзона:</strong></label><br>
+                            <input type="text" name="timezone"
+                                   value="{{ automation_settings.timezone if automation_settings and automation_settings.timezone else 'Europe/Berlin' }}"
+                                   style="padding: 8px; border: 1px solid #ddd; border-radius: 6px; width: 180px;">
+                        </div>
+
+                        <div>
+                            <label><strong>Ліміт постів/день:</strong></label><br>
+                            <input type="number" name="max_posts_per_day" min="1" max="10"
+                                   value="{{ automation_settings.max_posts_per_day if automation_settings else 2 }}"
+                                   style="padding: 8px; border: 1px solid #ddd; border-radius: 6px; width: 120px;">
+                        </div>
+                    </div>
+
+                    <div>
+                        <button type="submit" style="padding: 10px 16px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer; width: fit-content;">
+                            💾 Зберегти
+                        </button>
+                        <p style="color:#666; margin: 8px 0 0 0; font-size: 0.9em;">
+                            Для повної автоматизації потрібен запущений воркер: <code>py -3.10 automation_runner.py</code>
+                        </p>
+                    </div>
+                </form>
+            </div>
+            
+            <form method="POST" action="{{ url_for('ai_fetch_trends') }}" style="margin-bottom: 20px;">
+                <button type="submit" class="btn-primary"
+                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 12px 25px; border: none; border-radius: 8px; cursor: pointer;">
+                    🔄 Оновити тренди
+                </button>
+            </form>
+            
+            {% if trends %}
+            <div class="trends-grid" style="display: grid; gap: 15px;">
+                {% for trend in trends %}
+                <div style="background: #f5f5f5; padding: 15px; border-radius: 8px; border-left: 4px solid #667eea;">
+                    {% if trend.image_url %}
+                    <div style="margin-bottom: 10px;">
+                        <img src="{{ trend.image_url }}" alt="" style="width: 100%; max-height: 220px; object-fit: cover; border-radius: 8px;">
+                    </div>
+                    {% endif %}
+                    <h4>{{ trend.title }}</h4>
+                    <p style="color: #666; font-size: 0.9em;">{{ (trend.content or '')[:200] }}...</p>
+                    <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
+                        <span style="background: #e3f2fd; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;">
+                            📍 {{ trend.source }}
+                        </span>
+                        {% for kw in (trend.matched_keywords or [])[:3] %}
+                        <span style="background: #e8f5e9; padding: 3px 8px; border-radius: 4px; font-size: 0.85em;">
+                            {{ kw }}
+                        </span>
+                        {% endfor %}
+                    </div>
+                    <a href="{{ trend.link }}" target="_blank" style="display: inline-block; margin-top: 10px; color: #667eea;">
+                        Читати далі →
+                    </a>
+
+                    <form method="POST" action="{{ url_for('ai_create_draft_from_trend', trend_id=trend.id) }}" style="margin-top: 12px;">
+                        <button type="submit" style="padding: 10px 16px; background: #667eea; color: white; border: none; border-radius: 6px; cursor: pointer;">
+                            ✨ Зробити саммарі + чернетку поста
+                        </button>
+                    </form>
+                </div>
+                {% endfor %}
+            </div>
+            
+            {% if content_ideas %}
+            <h3 style="margin-top: 30px;">💡 Ідеї для постів на основі трендів:</h3>
+            {% for idea in content_ideas %}
+            <div style="background: #fff3e0; padding: 15px; border-radius: 8px; margin-top: 10px;">
+                <p>{{ idea.post_idea }}</p>
+                <p style="color: #666; font-size: 0.9em; margin-top: 5px;">
+                    🏷️ {{ idea.hashtags[:5] | join(' ') }}
+                </p>
+            </div>
+            {% endfor %}
+            {% endif %}
+            
+            {% else %}
+            <p style="color: #666; text-align: center; padding: 40px;">
+                Натисніть "Оновити тренди" щоб завантажити останні новини
+            </p>
+            {% endif %}
+        </div>
+    </div>
+</div>
+
+<script>
+function showTab(tabName, btn) {
+    // Сховати всі таби
+    document.querySelectorAll('.tab-content').forEach(tab => {
+        tab.style.display = 'none';
+    });
+    document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.style.background = '#e0e0e0';
+        btn.style.color = 'black';
+    });
+    
+    // Показати обраний
+    document.getElementById('tab-' + tabName).style.display = 'block';
+
+    const activeBtn = btn || document.querySelector('.tab-btn[data-tab="' + tabName + '"]');
+    if (activeBtn) {
+        activeBtn.style.background = '#667eea';
+        activeBtn.style.color = 'white';
+    }
+}
+
+function copyMessage(btn) {
+    const text = btn.parentElement.querySelector('p').textContent;
+    navigator.clipboard.writeText(text);
+    btn.textContent = '✅ Скопійовано!';
+    setTimeout(() => btn.textContent = '📋 Копіювати', 2000);
+}
+
+function copyContent() {
+    const caption = document.querySelector('#tab-content .card p[style*="pre-line"]').textContent;
+    const hashtags = document.querySelector('#tab-content .card p[style*="color: #1976d2"]').textContent;
+    navigator.clipboard.writeText(caption + '\n\n' + hashtags);
+    alert('✅ Контент скопійовано!');
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+    const initialTab = '{{ active_tab or "analyze" }}';
+    showTab(initialTab);
+});
+</script>
+{% endblock %}

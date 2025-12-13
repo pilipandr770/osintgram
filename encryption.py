@@ -66,6 +66,6 @@ def decrypt_password(encrypted_password: str) -> str:
         decrypted = fernet.decrypt(encrypted_password.encode())
         return decrypted.decode()
     except Exception as e:
-        print(f"⚠️ Помилка розшифрування: {e}")
+        print(f"Помилка розшифрування: {e}")
         # Якщо не вдалося розшифрувати - можливо пароль ще не зашифрований
         return encrypted_password

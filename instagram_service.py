@@ -63,55 +63,55 @@ class InstagramService:
                 self.client.load_settings(self.session_file)
                 self.client.login(self.username, self.password)
                 self._logged_in = True
-                print(f"✅ Вход через сохранённую сессию: {self.username}")
+                print(f"OK: login via saved session: {self.username}")
                 return True, "Успешно вошли через сохранённую сессию"
             except Exception as e:
-                print(f"⚠️ Сессия устарела, пробуем обычный вход: {e}")
+                print(f"WARN: session expired, fallback to normal login: {e}")
                 os.remove(self.session_file)
         
         # Обычный вход
         try:
-            print(f"🔐 Попытка входа: {self.username}")
+            print(f"INFO: login attempt: {self.username}")
             self.client.login(self.username, self.password)
             self._logged_in = True
             
             # Сохраняем сессию
             self.client.dump_settings(self.session_file)
-            print(f"✅ Успешный вход, сессия сохранена: {self.username}")
+            print(f"OK: login success, session saved: {self.username}")
             
             return True, "Успешно вошли в аккаунт"
             
         except BadPassword as e:
-            print(f"❌ BadPassword для {self.username}: {e}")
+            print(f"ERROR: BadPassword for {self.username}: {e}")
             return False, "Неверный пароль. Проверьте правильность пароля."
             
         except TwoFactorRequired:
-            print(f"⚠️ 2FA требуется для {self.username}")
+            print(f"WARN: 2FA required for {self.username}")
             return False, "Включена двухфакторная аутентификация. Отключите 2FA в настройках Instagram или используйте App Password."
             
         except ChallengeRequired as e:
-            print(f"⚠️ Challenge для {self.username}: {e}")
+            print(f"WARN: Challenge for {self.username}: {e}")
             return False, "Instagram требует подтверждение! Откройте Instagram в браузере с этого же компьютера, пройдите проверку, затем попробуйте снова."
             
         except SelectContactPointRecoveryForm:
-            print(f"⚠️ Recovery form для {self.username}")
+            print(f"WARN: Recovery form for {self.username}")
             return False, "Instagram требует подтверждение через email/телефон. Войдите в Instagram через браузер."
             
         except RecaptchaChallengeForm:
-            print(f"⚠️ Captcha для {self.username}")
+            print(f"WARN: Captcha for {self.username}")
             return False, "Instagram показывает капчу. Войдите в Instagram через браузер и пройдите проверку."
             
         except FeedbackRequired as e:
-            print(f"⚠️ Feedback required для {self.username}: {e}")
+            print(f"WARN: FeedbackRequired for {self.username}: {e}")
             return False, "Instagram заблокировал действие. Подождите несколько часов."
             
         except PleaseWaitFewMinutes:
-            print(f"⚠️ Rate limit для {self.username}")
+            print(f"WARN: Rate limit for {self.username}")
             return False, "Слишком много попыток. Подождите 10-15 минут."
             
         except ClientError as e:
             error_msg = str(e)
-            print(f"❌ ClientError для {self.username}: {error_msg}")
+            print(f"ERROR: ClientError for {self.username}: {error_msg}")
             
             if 'checkpoint' in error_msg.lower():
                 return False, "Instagram требует подтверждение! Откройте приложение Instagram на телефоне."
@@ -122,7 +122,7 @@ class InstagramService:
                 
         except Exception as e:
             error_msg = str(e)
-            print(f"❌ Общая ошибка для {self.username}: {error_msg}")
+            print(f"ERROR: login error for {self.username}: {error_msg}")
             
             # Анализируем текст ошибки
             if 'password' in error_msg.lower() or 'credentials' in error_msg.lower():
@@ -415,6 +415,19 @@ class InstagramService:
         except Exception as e:
             logger.error(f"Error publishing carousel: {str(e)}")
             return False, str(e)
+
+    def publish_reel(self, caption: str, video_path: str) -> Tuple[bool, str]:
+        """Upload a video as a Reel/Clip.
+
+        Uses instagrapi Client.clip_upload(). The video file should be an MP4 with
+        H.264 + AAC.
+        """
+        try:
+            media = self.client.clip_upload(video_path, caption)
+            return True, str(media.pk)
+        except Exception as e:
+            logger.error(f"Error publishing reel: {str(e)}")
+            return False, str(e)
     
     @staticmethod
     def _extract_contacts_from_bio(bio: str) -> Tuple[Optional[str], Optional[str], Optional[str]]:
@@ -683,3 +696,54 @@ class InstagramService:
         
         print(f"✅ Знайдено та проаналізовано {len(enriched_accounts)} потенційних акаунтів")
         return enriched_accounts
+
+    def send_direct_message(self, username: str, message: str) -> Dict:
+        """
+        Відправити повідомлення в Direct
+        
+        Args:
+            username: username отримувача (без @)
+            message: текст повідомлення
+            
+        Returns:
+            Dict: {'success': bool, 'error': str или None, 'thread_id': str или None}
+        """
+        if not self._logged_in:
+            return {'success': False, 'error': 'Не авторизовано'}
+        
+        try:
+            # Убираємо @ якщо є
+            username = username.lstrip('@').strip()
+            
+            # Отримуємо user_id отримувача
+            try:
+                user_id = self.client.user_id_from_username(username)
+            except Exception as e:
+                return {'success': False, 'error': f'Користувач не знайдений: {username}'}
+            
+            # Відправляємо повідомлення
+            thread = self.client.direct_send(message, [user_id])
+            
+            print(f"✅ Повідомлення відправлено: @{username}")
+            return {
+                'success': True,
+                'error': None,
+                'thread_id': str(thread.id) if hasattr(thread, 'id') else None
+            }
+            
+        except FeedbackRequired as e:
+            print(f"⚠️ Instagram обмежив дії: {e}")
+            return {'success': False, 'error': 'feedback_required - Instagram обмежив розсилку'}
+            
+        except ChallengeRequired as e:
+            print(f"⚠️ Challenge required: {e}")
+            return {'success': False, 'error': 'challenge_required - Потрібне підтвердження'}
+            
+        except PleaseWaitFewMinutes:
+            print(f"⚠️ Rate limit")
+            return {'success': False, 'error': 'rate_limit - Зачекайте кілька хвилин'}
+            
+        except Exception as e:
+            error_msg = str(e)
+            print(f"❌ Помилка відправки в @{username}: {error_msg}")
+            return {'success': False, 'error': error_msg}

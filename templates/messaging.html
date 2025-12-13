@@ -1,0 +1,229 @@
+{% extends "base.html" %}
+
+{% block title %}📨 Розсилка повідомлень{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>📨 Розсилка в Direct</h1>
+    
+    <!-- Предупреждение -->
+    <div class="alert alert-warning" style="background: #fff3cd; border: 1px solid #ffc107; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+        <h3>⚠️ Важливо! Ліміти Instagram:</h3>
+        <ul>
+            <li><strong>Нові акаунти:</strong> 10-20 повідомлень на день</li>
+            <li><strong>Старі акаунти (6+ місяців):</strong> 50-80 повідомлень на день</li>
+            <li><strong>Затримка між повідомленнями:</strong> мінімум 30-60 секунд</li>
+            <li><strong>Ризики:</strong> тимчасовий бан, обмеження функцій, блокування акаунта</li>
+        </ul>
+        <p>💡 Рекомендуємо: персоналізовані повідомлення, не більше 20 на день, природні затримки.</p>
+    </div>
+    
+    <!-- Статистика -->
+    <div class="stats-grid" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 15px; margin-bottom: 20px;">
+        <div class="stat-card" style="background: #e8f5e9; padding: 20px; border-radius: 8px; text-align: center;">
+            <div style="font-size: 2em; font-weight: bold; color: #2e7d32;">{{ total_followers }}</div>
+            <div>Всього контактів</div>
+        </div>
+        <div class="stat-card" style="background: #e3f2fd; padding: 20px; border-radius: 8px; text-align: center;">
+            <div style="font-size: 2em; font-weight: bold; color: #1565c0;">{{ target_audience }}</div>
+            <div>Цільова аудиторія</div>
+        </div>
+        <div class="stat-card" style="background: #fff3e0; padding: 20px; border-radius: 8px; text-align: center;">
+            <div style="font-size: 2em; font-weight: bold; color: #ef6c00;">{{ messages_sent_today }}</div>
+            <div>Відправлено сьогодні</div>
+        </div>
+        <div class="stat-card" style="background: #fce4ec; padding: 20px; border-radius: 8px; text-align: center;">
+            <div style="font-size: 2em; font-weight: bold; color: #c2185b;">{{ daily_limit - messages_sent_today }}</div>
+            <div>Залишилось сьогодні</div>
+        </div>
+    </div>
+    
+    <!-- Форма розсилки -->
+    <div class="card" style="background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1);">
+        <h2>✍️ Створити розсилку</h2>
+        
+        <form id="messagingForm" method="POST" action="{{ url_for('send_messages') }}">
+            <!-- Вибір акаунта -->
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label><strong>📱 Акаунт для відправки:</strong></label>
+                <select name="account_id" class="form-control" style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ddd;" required>
+                    <option value="">-- Оберіть акаунт --</option>
+                    {% for account in accounts %}
+                    <option value="{{ account.id }}">@{{ account.username }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            
+            <!-- Вибір аудиторії -->
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label><strong>👥 Кому відправляти:</strong></label>
+                <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+                    <label style="display: flex; align-items: center; gap: 5px;">
+                        <input type="radio" name="audience" value="target" checked> 
+                        🎯 Тільки цільова аудиторія ({{ target_audience }})
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 5px;">
+                        <input type="radio" name="audience" value="frankfurt"> 
+                        📍 Регіон Франкфурт ({{ frankfurt_region }})
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 5px;">
+                        <input type="radio" name="audience" value="all"> 
+                        📋 Всі контакти ({{ total_followers }})
+                    </label>
+                </div>
+            </div>
+            
+            <!-- Лимит -->
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label><strong>🔢 Кількість повідомлень (макс. {{ daily_limit - messages_sent_today }}):</strong></label>
+                <input type="number" name="limit" class="form-control" 
+                       style="width: 150px; padding: 10px; border-radius: 6px; border: 1px solid #ddd;"
+                       min="1" max="{{ daily_limit - messages_sent_today }}" value="10" required>
+            </div>
+            
+            <!-- Затримка -->
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label><strong>⏱️ Затримка між повідомленнями (секунд):</strong></label>
+                <input type="number" name="delay" class="form-control" 
+                       style="width: 150px; padding: 10px; border-radius: 6px; border: 1px solid #ddd;"
+                       min="30" max="300" value="45" required>
+                <small style="color: #666;">Мінімум 30 секунд для безпеки</small>
+            </div>
+            
+            <!-- Текст повідомлення -->
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label><strong>💬 Текст повідомлення:</strong></label>
+                <textarea name="message" class="form-control" rows="5" 
+                          style="width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #ddd;"
+                          placeholder="Введіть текст повідомлення...
+
+Можна використовувати змінні:
+{name} - ім'я користувача
+{username} - @username" required></textarea>
+                <small style="color: #666;">
+                    Приклад: "Привіт, {name}! Ми займаємось укладанням плитки у Франкфурті. Цікавить безкоштовна консультація?"
+                </small>
+            </div>
+            
+            <!-- Шаблоны -->
+            <div class="form-group" style="margin-bottom: 20px;">
+                <label><strong>📝 Готові шаблони:</strong></label>
+                <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+                    <button type="button" class="template-btn" onclick="useTemplate('intro')"
+                            style="padding: 8px 15px; background: #e3f2fd; border: none; border-radius: 6px; cursor: pointer;">
+                        👋 Знайомство
+                    </button>
+                    <button type="button" class="template-btn" onclick="useTemplate('offer')"
+                            style="padding: 8px 15px; background: #e8f5e9; border: none; border-radius: 6px; cursor: pointer;">
+                        💼 Пропозиція
+                    </button>
+                    <button type="button" class="template-btn" onclick="useTemplate('discount')"
+                            style="padding: 8px 15px; background: #fff3e0; border: none; border-radius: 6px; cursor: pointer;">
+                        🎁 Знижка
+                    </button>
+                </div>
+            </div>
+            
+            <!-- Кнопка отправки -->
+            <div style="display: flex; gap: 15px; align-items: center;">
+                <button type="submit" class="btn-primary" 
+                        style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 15px 30px; border: none; border-radius: 8px; font-size: 1.1em; cursor: pointer;">
+                    🚀 Почати розсилку
+                </button>
+                <label style="display: flex; align-items: center; gap: 5px;">
+                    <input type="checkbox" name="confirm" required>
+                    Я розумію ризики та погоджуюсь
+                </label>
+            </div>
+        </form>
+    </div>
+    
+    <!-- История рассылок -->
+    <div class="card" style="background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-top: 20px;">
+        <h2>📊 Історія розсилок</h2>
+        {% if message_logs %}
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="background: #f5f5f5;">
+                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Дата</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Акаунт</th>
+                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">Відправлено</th>
+                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">Успішно</th>
+                    <th style="padding: 12px; text-align: center; border-bottom: 2px solid #ddd;">Помилки</th>
+                    <th style="padding: 12px; text-align: left; border-bottom: 2px solid #ddd;">Статус</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for log in message_logs %}
+                <tr>
+                    <td style="padding: 12px; border-bottom: 1px solid #eee;">{{ log.created_at.strftime('%d.%m.%Y %H:%M') }}</td>
+                    <td style="padding: 12px; border-bottom: 1px solid #eee;">@{{ log.account_username }}</td>
+                    <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee;">{{ log.total_sent }}</td>
+                    <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee; color: green;">{{ log.successful }}</td>
+                    <td style="padding: 12px; text-align: center; border-bottom: 1px solid #eee; color: red;">{{ log.failed }}</td>
+                    <td style="padding: 12px; border-bottom: 1px solid #eee;">
+                        {% if log.status == 'completed' %}
+                        <span style="color: green;">✅ Завершено</span>
+                        {% elif log.status == 'running' %}
+                        <span style="color: orange;">🔄 В процесі</span>
+                        {% else %}
+                        <span style="color: red;">❌ {{ log.status }}</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <p style="color: #666; text-align: center; padding: 40px;">Поки немає розсилок</p>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+const templates = {
+    intro: `Привіт, {name}! 👋
+
+Побачив ваш профіль і вирішив написати. Ми займаємось професійним укладанням плитки та ремонтом ванних кімнат у регіоні Франкфурт.
+
+Якщо вас цікавить якісний ремонт - буду радий відповісти на питання! 🏠`,
+    
+    offer: `Вітаю, {name}! 
+
+Наша компанія спеціалізується на:
+🔹 Укладання плитки
+🔹 Ремонт ванних кімнат
+🔹 Сантехнічні роботи
+
+Працюємо по всьому Франкфурту та околицях. Безкоштовний виїзд на замір!
+
+Зацікавило? Напишіть - обговоримо деталі 💬`,
+    
+    discount: `Привіт, {name}! 🎁
+
+Маємо спеціальну пропозицію для нових клієнтів:
+⭐ -15% на укладання плитки
+⭐ Безкоштовна консультація
+⭐ Гарантія 2 роки
+
+Акція діє до кінця місяця. Встигніть скористатись! 
+
+Напишіть "Хочу знижку" для деталей 👇`
+};
+
+function useTemplate(name) {
+    document.querySelector('textarea[name="message"]').value = templates[name];
+}
+</script>
+
+<style>
+.template-btn:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+}
+.btn-primary:hover {
+    transform: scale(1.02);
+    box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+}
+</style>
+{% endblock %}

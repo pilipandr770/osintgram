@@ -7,16 +7,20 @@ from flask_login import LoginManager, login_required, current_user
 from flask_migrate import Migrate
 from config import config
 from database import db, init_db
-from models import User, InstagramAccount, Follower, ParseSession, PublishedContent, ExportHistory
+from models import User, InstagramAccount, Follower, ParseSession, PublishedContent, ExportHistory, MessageLog, SentMessage, RssTrend, ContentIdea, AutomationSettings, AiCache
 from instagram_service import InstagramService
 from encryption import encrypt_password, decrypt_password
 from geo_search import analyze_profile_relevance, HASHTAGS_SEARCH
+from ai_service import analyze_profile, generate_personalized_message, generate_post_content, batch_analyze_profiles, summarize_trend, OPENAI_API_KEY
+from rss_service import get_trending_topics, generate_content_ideas_from_trends
 from auth import auth_bp
 import os
 from datetime import datetime
 from io import BytesIO, StringIO
 import csv
 from dotenv import load_dotenv
+import uuid
+from media_utils import normalize_to_jpeg
 
 # Загрузить переменные окружения
 load_dotenv()
@@ -64,11 +68,11 @@ def create_app(config_name=None):
         with db.engine.connect() as conn:
             conn.execute(text(f'CREATE SCHEMA IF NOT EXISTS {SCHEMA_NAME}'))
             conn.commit()
-            print(f"✅ Schema '{SCHEMA_NAME}' создана или уже существует")
+            print(f"Schema '{SCHEMA_NAME}' создана или уже существует")
         
         # Затем создаём таблицы
         db.create_all()
-        print(f"✅ Все таблицы созданы в schema '{SCHEMA_NAME}'")
+        print(f"Все таблицы созданы в schema '{SCHEMA_NAME}'")
     
     # ============ ROUTES ============
     
@@ -202,6 +206,14 @@ def create_app(config_name=None):
             return redirect(url_for('manage_accounts'))
         
         try:
+            # Best-effort: remove local instagrapi session file for this username
+            try:
+                session_path = os.path.join(os.path.dirname(__file__), 'sessions', f"{account.instagram_username}_session.json")
+                if os.path.exists(session_path):
+                    os.remove(session_path)
+            except Exception:
+                pass
+
             db.session.delete(account)
             db.session.commit()
             flash(f'Аккаунт @{account.instagram_username} удален', 'success')
@@ -426,13 +438,17 @@ def create_app(config_name=None):
                 continue
             
             # Создаём запись подписчика
+            # ✅ Все подписчики конкурентов = целевая аудитория!
             follower = Follower(
                 user_id=current_user.id,
                 parse_session_id=parse_session.id,
                 instagram_user_id=username,  # Используем username как временный ID
                 username=username,
                 source_account_username=source_account,
-                collected_at=datetime.utcnow()
+                collected_at=datetime.utcnow(),
+                is_target_audience=True,  # Всі підписчики конкурентів - цільові
+                is_frankfurt_region=True,  # Припускаємо регіон Франкфурт
+                interest_score=50  # Базовий рейтинг інтересу
             )
             db.session.add(follower)
             imported_count += 1
@@ -688,23 +704,49 @@ def create_app(config_name=None):
                 # Создать папку для uploads если нет
                 upload_folder = app.config.get('UPLOAD_FOLDER', 'uploads')
                 os.makedirs(upload_folder, exist_ok=True)
+
+                normalized_folder = os.path.join(upload_folder, 'normalized')
+                os.makedirs(normalized_folder, exist_ok=True)
                 
-                # Сохранить файлы временно
+                # Save uploaded files and normalize images to JPEG (instagrapi photo upload requires JPG/JPEG)
                 temp_paths = []
+                media_paths = []
                 for file in files:
-                    if file.filename:
-                        filename = f"temp_{datetime.now().timestamp()}_{file.filename}"
-                        filepath = os.path.join(upload_folder, filename)
-                        file.save(filepath)
-                        temp_paths.append(filepath)
+                    if not file.filename:
+                        continue
+
+                    tmp_name = f"upload_{uuid.uuid4().hex}"
+                    tmp_path = os.path.join(upload_folder, tmp_name)
+                    file.save(tmp_path)
+                    temp_paths.append(tmp_path)
+
+                    # Convert to JPG
+                    jpg_path = os.path.join(normalized_folder, f"{uuid.uuid4().hex}.jpg")
+                    try:
+                        normalize_to_jpeg(tmp_path, jpg_path)
+                        media_paths.append(jpg_path)
+                    except Exception as e:
+                        # cleanup and show readable error
+                        for p in temp_paths:
+                            try:
+                                os.remove(p)
+                            except Exception:
+                                pass
+                        for p in media_paths:
+                            try:
+                                os.remove(p)
+                            except Exception:
+                                pass
+                        flash(f'Ошибка файла: {str(e)}. Для публикации используйте изображения.', 'error')
+                        return redirect(url_for('publish_content'))
                 
                 # Опубликовать
-                if content_type == 'post' and len(temp_paths) == 1:
-                    is_success, result = service.publish_post(caption, temp_paths[0])
-                elif content_type == 'story':
-                    is_success, result = service.publish_story(temp_paths[0])
-                elif content_type == 'carousel' and len(temp_paths) > 1:
-                    is_success, result = service.publish_carousel(caption, temp_paths)
+                if content_type == 'post' and len(media_paths) == 1:
+                    is_success, result = service.publish_post(caption, media_paths[0])
+                elif content_type == 'story' and len(media_paths) >= 1:
+                    is_success, result = service.publish_story(media_paths[0])
+                elif content_type == 'carousel' and len(media_paths) > 1:
+                    is_success, result = service.publish_carousel(caption, media_paths)
                 else:
                     is_success, result = False, 'Неизвестный тип контента или неверное количество файлов'
                 
@@ -725,6 +767,11 @@ def create_app(config_name=None):
                 
                 # Удалить временные файлы
                 for path in temp_paths:
+                    try:
+                        os.remove(path)
+                    except Exception:
+                        pass
+                for path in media_paths:
                     try:
                         os.remove(path)
                     except Exception:
@@ -785,6 +832,614 @@ def create_app(config_name=None):
             exports=exports
         )
     
+    # ============ MESSAGING ROUTES ============
+    
+    @app.route('/messaging')
+    @login_required
+    def messaging():
+        """📨 Сторінка розсилки повідомлень в Direct"""
+        user_id = current_user.id
+        
+        # Статистика
+        total_followers = Follower.query.filter_by(user_id=user_id).count()
+        target_audience = Follower.query.filter_by(user_id=user_id, is_target_audience=True).count()
+        frankfurt_region = Follower.query.filter_by(user_id=user_id, is_frankfurt_region=True).count()
+        
+        # Скільки повідомлень відправлено сьогодні
+        from datetime import date
+        today = date.today()
+        messages_sent_today = SentMessage.query.filter(
+            SentMessage.user_id == user_id,
+            db.func.date(SentMessage.sent_at) == today
+        ).count()
+        
+        # Денний ліміт (безпечний)
+        daily_limit = 20
+        
+        # Акаунти
+        accounts = InstagramAccount.query.filter_by(user_id=user_id).all()
+        
+        # Історія розсилок
+        message_logs = MessageLog.query.filter_by(user_id=user_id).order_by(
+            MessageLog.created_at.desc()
+        ).limit(20).all()
+        
+        return render_template('messaging.html',
+            total_followers=total_followers,
+            target_audience=target_audience,
+            frankfurt_region=frankfurt_region,
+            messages_sent_today=messages_sent_today,
+            daily_limit=daily_limit,
+            accounts=accounts,
+            message_logs=message_logs
+        )
+    
+    @app.route('/send-messages', methods=['POST'])
+    @login_required
+    def send_messages():
+        """🚀 Відправка повідомлень в Direct"""
+        import time
+        import random
+        
+        user_id = current_user.id
+        
+        # Отримуємо параметри
+        account_id = request.form.get('account_id')
+        audience_type = request.form.get('audience', 'target')
+        limit = int(request.form.get('limit', 10))
+        delay = int(request.form.get('delay', 45))
+        message_template = request.form.get('message', '').strip()
+        
+        if not account_id or not message_template:
+            flash('Оберіть акаунт та введіть повідомлення', 'error')
+            return redirect(url_for('messaging'))
+        
+        # Перевірка ліміту
+        from datetime import date
+        today = date.today()
+        messages_sent_today = SentMessage.query.filter(
+            SentMessage.user_id == user_id,
+            db.func.date(SentMessage.sent_at) == today
+        ).count()
+        
+        daily_limit = 20
+        remaining = daily_limit - messages_sent_today
+        
+        if remaining <= 0:
+            flash('❌ Денний ліміт вичерпано! Спробуйте завтра.', 'error')
+            return redirect(url_for('messaging'))
+        
+        limit = min(limit, remaining)
+        
+        # Отримуємо акаунт
+        account = InstagramAccount.query.filter_by(id=account_id, user_id=user_id).first()
+        if not account:
+            flash('Акаунт не знайдено', 'error')
+            return redirect(url_for('messaging'))
+        
+        # Отримуємо аудиторію
+        if audience_type == 'target':
+            followers = Follower.query.filter_by(user_id=user_id, is_target_audience=True)
+        elif audience_type == 'frankfurt':
+            followers = Follower.query.filter_by(user_id=user_id, is_frankfurt_region=True)
+        else:
+            followers = Follower.query.filter_by(user_id=user_id)
+        
+        # Виключаємо тих, кому вже писали
+        sent_usernames = db.session.query(SentMessage.recipient_username).filter_by(user_id=user_id).all()
+        sent_set = {s[0] for s in sent_usernames}
+        
+        recipients = followers.filter(~Follower.username.in_(sent_set)).limit(limit).all()
+        
+        if not recipients:
+            flash('⚠️ Немає нових отримувачів для розсилки', 'warning')
+            return redirect(url_for('messaging'))
+        
+        # Створюємо лог розсилки
+        message_log = MessageLog(
+            user_id=user_id,
+            account_id=account_id,
+            account_username=account.instagram_username,
+            message_template=message_template,
+            audience_type=audience_type,
+            status='running'
+        )
+        db.session.add(message_log)
+        db.session.commit()
+        
+        # Логін в Instagram
+        try:
+            decrypted_pwd = decrypt_password(account.instagram_password)
+            service = InstagramService(account.instagram_username, decrypted_pwd)
+            success, login_msg = service.login()
+            
+            if not success:
+                message_log.status = 'error'
+                message_log.error_message = login_msg
+                db.session.commit()
+                flash(f'❌ Помилка входу: {login_msg}', 'error')
+                return redirect(url_for('messaging'))
+                
+        except Exception as e:
+            message_log.status = 'error'
+            message_log.error_message = str(e)
+            db.session.commit()
+            flash(f'❌ Помилка: {str(e)}', 'error')
+            return redirect(url_for('messaging'))
+        
+        # Відправляємо повідомлення
+        successful = 0
+        failed = 0
+        
+        for i, follower in enumerate(recipients):
+            try:
+                # Персоналізація
+                personalized_msg = message_template.replace('{name}', follower.full_name or follower.username)
+                personalized_msg = personalized_msg.replace('{username}', f'@{follower.username}')
+                
+                # Відправка
+                result = service.send_direct_message(follower.username, personalized_msg)
+                
+                if result.get('success'):
+                    successful += 1
+                    status = 'sent'
+                    error = None
+                else:
+                    failed += 1
+                    status = 'failed'
+                    error = result.get('error', 'Unknown error')
+                
+                # Зберігаємо
+                sent_msg = SentMessage(
+                    user_id=user_id,
+                    message_log_id=message_log.id,
+                    recipient_username=follower.username,
+                    recipient_user_id=follower.instagram_user_id,
+                    status=status,
+                    error_message=error
+                )
+                db.session.add(sent_msg)
+                
+                # Затримка між повідомленнями (випадкова для природності)
+                if i < len(recipients) - 1:
+                    actual_delay = delay + random.randint(-10, 15)
+                    time.sleep(max(30, actual_delay))
+                    
+            except Exception as e:
+                failed += 1
+                sent_msg = SentMessage(
+                    user_id=user_id,
+                    message_log_id=message_log.id,
+                    recipient_username=follower.username,
+                    status='failed',
+                    error_message=str(e)
+                )
+                db.session.add(sent_msg)
+                
+                # Якщо забанили - зупиняємось
+                if 'feedback_required' in str(e).lower() or 'challenge' in str(e).lower():
+                    message_log.status = 'stopped'
+                    message_log.error_message = 'Instagram обмежив дії. Зачекайте 24-48 годин.'
+                    break
+        
+        # Оновлюємо лог
+        message_log.total_sent = successful + failed
+        message_log.successful = successful
+        message_log.failed = failed
+        message_log.status = 'completed' if message_log.status != 'stopped' else 'stopped'
+        message_log.completed_at = datetime.utcnow()
+        db.session.commit()
+        
+        if message_log.status == 'stopped':
+            flash(f'⚠️ Розсилку зупинено! Відправлено: {successful}, помилок: {failed}. Instagram обмежив дії.', 'warning')
+        else:
+            flash(f'✅ Розсилка завершена! Відправлено: {successful}, помилок: {failed}', 'success')
+        
+        return redirect(url_for('messaging'))
+    
+    # ============ AI ASSISTANT ROUTES ============
+    
+    @app.route('/ai')
+    @login_required
+    def ai_assistant():
+        """🤖 AI Асистент - головна сторінка"""
+        from flask import session as flask_session
+
+        requested_tab = request.args.get('tab', 'analyze')
+        if requested_tab not in {'analyze', 'generate', 'content', 'trends'}:
+            requested_tab = 'analyze'
+
+        # Прибираємо великі payload'и зі session (cookie) щоб не перевищувати ліміт браузера
+        flask_session.pop('ai_trends', None)
+        flask_session.pop('ai_content_ideas', None)
+
+        # Тренди з БД (сервер-сайд), щоб не зберігати в session
+        trends = (RssTrend.query
+                  .filter_by(user_id=current_user.id)
+                  .order_by(RssTrend.fetched_at.desc())
+                  .limit(10)
+                  .all())
+
+        trends_for_ideas = [
+            {
+                'title': t.title,
+                'link': t.link,
+                'content': t.content or '',
+                'published': t.published_at,
+                'source': t.source,
+                'category': t.category,
+                'language': t.language,
+                'matched_keywords': t.matched_keywords or [],
+                'relevance_score': t.relevance_score or 0,
+            }
+            for t in trends
+        ]
+        content_ideas = generate_content_ideas_from_trends(trends_for_ideas) if trends_for_ideas else None
+
+        # AI результати з БД (не в cookie-session)
+        def _latest_cache(kind: str):
+            row = (AiCache.query
+                   .filter_by(user_id=current_user.id, kind=kind)
+                   .order_by(AiCache.created_at.desc())
+                   .first())
+            return row.payload if row and row.payload else None
+
+        settings = AutomationSettings.query.filter_by(user_id=current_user.id).first()
+
+        return render_template('ai_assistant.html',
+            ai_available=bool(OPENAI_API_KEY),
+            active_tab=requested_tab,
+            analysis_results=_latest_cache('analysis'),
+            generated_messages=_latest_cache('message'),
+            generated_content=_latest_cache('content'),
+            trends=trends,
+            content_ideas=content_ideas,
+            automation_settings=settings
+        )
+    
+    @app.route('/ai/analyze', methods=['POST'])
+    @login_required
+    def ai_analyze_profiles():
+        """🔍 AI аналіз профілів"""
+        from flask import session as flask_session
+        import re
+        
+        limit = int(request.form.get('limit', 20))
+        filter_type = request.form.get('filter', 'unanalyzed')
+        
+        # Отримуємо профілі для аналізу
+        query = Follower.query.filter_by(user_id=current_user.id)
+        
+        if filter_type == 'unanalyzed':
+            query = query.filter(Follower.quality_score == 0)
+        elif filter_type == 'low_score':
+            query = query.filter(Follower.quality_score < 30)
+        
+        followers = query.limit(limit).all()
+        
+        if not followers:
+            flash('Немає профілів для аналізу', 'warning')
+            return redirect(url_for('ai_assistant', tab='analyze'))
+        
+        # Конвертуємо в dict для AI (і відсікаємо невалідні username)
+        username_re = re.compile(r'^[A-Za-z0-9._]{1,30}$')
+        profiles = []
+        skipped = 0
+        for f in followers:
+            uname = (f.username or '').strip().lstrip('@')
+            if not uname or not username_re.match(uname):
+                skipped += 1
+                continue
+            profiles.append({
+                'username': uname,
+                'biography': f.biography,
+                'followers_count': f.followers_count or 0,
+                'posts_count': f.posts_count or 0,
+                'is_business': f.is_business or False
+            })
+        
+        if not profiles:
+            flash('Немає валідних профілів для аналізу (username не пройшли валідацію)', 'warning')
+            return redirect(url_for('ai_assistant', tab='analyze'))
+
+        # Аналізуємо
+        results = batch_analyze_profiles(profiles, max_profiles=len(profiles))
+        
+        # Оновлюємо в базі
+        for result in results:
+            follower = Follower.query.filter_by(
+                user_id=current_user.id,
+                username=result['username']
+            ).first()
+            
+            if follower and 'ai_analysis' in result:
+                ai = result['ai_analysis']
+                follower.quality_score = ai.get('quality_score', 50)
+                follower.is_target_audience = ai.get('is_target_audience', True)
+        
+        db.session.commit()
+        
+        # Зберігаємо короткий результат в БД, щоб не роздувати cookie-session
+        try:
+            compact = []
+            for r in results[:50]:
+                compact.append({
+                    'username': r.get('username'),
+                    'ai_analysis': r.get('ai_analysis')
+                })
+            db.session.add(AiCache(user_id=current_user.id, kind='analysis', payload=compact))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+
+        extra = f' (пропущено невалідних: {skipped})' if skipped else ''
+        flash(f'✅ Проаналізовано {len(results)} профілів!{extra}', 'success')
+        
+        return redirect(url_for('ai_assistant', tab='analyze'))
+    
+    @app.route('/ai/generate-message', methods=['POST'])
+    @login_required
+    def ai_generate_message():
+        """✍️ Генерація персоналізованого повідомлення"""
+        from flask import session as flask_session
+        
+        username = request.form.get('username', '').strip().lstrip('@')
+        bio = request.form.get('bio', '').strip()
+        goal = request.form.get('goal', 'знайомство')
+        
+        if not username:
+            flash('Введіть username', 'error')
+            return redirect(url_for('ai_assistant', tab='generate'))
+        
+        # Генеруємо
+        result = generate_personalized_message(
+            recipient_username=username,
+            recipient_bio=bio,
+            message_goal=goal
+        )
+        
+        try:
+            db.session.add(AiCache(user_id=current_user.id, kind='message', payload=result))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        flash('✅ Повідомлення згенеровано!', 'success')
+        
+        return redirect(url_for('ai_assistant', tab='generate'))
+    
+    @app.route('/ai/generate-content', methods=['POST'])
+    @login_required
+    def ai_generate_content():
+        """📝 Генерація контенту для публікації"""
+        from flask import session as flask_session
+        
+        topic = request.form.get('topic', '').strip()
+        post_type = request.form.get('post_type', 'informative')
+        
+        if not topic:
+            flash('Введіть тему', 'error')
+            return redirect(url_for('ai_assistant', tab='content'))
+        
+        # Генеруємо
+        result = generate_post_content(topic=topic, post_type=post_type)
+        
+        try:
+            db.session.add(AiCache(user_id=current_user.id, kind='content', payload=result))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        flash('✅ Контент згенеровано!', 'success')
+        
+        return redirect(url_for('ai_assistant', tab='content'))
+    
+    @app.route('/ai/trends', methods=['POST'])
+    @login_required
+    def ai_fetch_trends():
+        """📰 Отримання трендів з RSS"""
+        from flask import session as flask_session
+
+        # Гарантовано чистимо старі великі поля з cookie-based session
+        flask_session.pop('ai_trends', None)
+        flask_session.pop('ai_content_ideas', None)
+
+        trends = get_trending_topics(days=14, max_topics=10)
+        if not trends:
+            flash('Не вдалося завантажити тренди з RSS', 'warning')
+            return redirect(url_for('ai_assistant', tab='trends'))
+
+        try:
+            now = datetime.utcnow()
+            links = [t.get('link') for t in trends if t.get('link')]
+
+            existing_by_link = {}
+            if links:
+                existing = (RssTrend.query
+                            .filter(RssTrend.user_id == current_user.id, RssTrend.link.in_(links))
+                            .all())
+                existing_by_link = {row.link: row for row in existing if row.link}
+
+            saved = 0
+            for trend in trends:
+                link = trend.get('link')
+                row = existing_by_link.get(link) if link else None
+
+                if row is None:
+                    row = RssTrend(
+                        user_id=current_user.id,
+                        title=trend.get('title', 'No title')[:500]
+                    )
+                    db.session.add(row)
+                    saved += 1
+
+                row.content = (trend.get('content') or '')
+                row.link = link
+                row.source = trend.get('source')
+                row.category = trend.get('category')
+                row.language = trend.get('language')
+                row.image_url = trend.get('image_url')
+                row.matched_keywords = trend.get('matched_keywords') or []
+                row.relevance_score = int(trend.get('relevance_score') or 0)
+                row.published_at = trend.get('published')
+                row.fetched_at = now
+
+            db.session.commit()
+            flash(f'✅ Завантажено {len(trends)} трендів (нових: {saved})!', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'❌ Помилка збереження трендів: {e}', 'error')
+
+        return redirect(url_for('ai_assistant', tab='trends'))
+
+    @app.route('/ai/trends/<trend_id>/create-draft', methods=['POST'])
+    @login_required
+    def ai_create_draft_from_trend(trend_id: str):
+        """📝 Створити чернетку поста з RSS тренду (саммарі + CTA)."""
+        from flask import session as flask_session
+
+        trend = RssTrend.query.filter_by(id=trend_id, user_id=current_user.id).first()
+        if not trend:
+            flash('Тренд не знайдено', 'error')
+            return redirect(url_for('ai_assistant', tab='trends'))
+
+        # AI саммарі
+        summary = summarize_trend(trend.title, trend.content or '')
+        summary_text = (summary.get('summary') or '').strip() or trend.title
+        relevance_text = (summary.get('relevance') or '').strip()
+
+        # Базові хештеги + трохи з ключових слів
+        hashtags = ['#fliesen', '#badsanierung', '#frankfurt', '#bathroom', '#renovierung', '#interiordesign']
+        for kw in (trend.matched_keywords or [])[:6]:
+            clean = ''.join(ch for ch in str(kw) if ch.isalnum() or ch in ['_', '-'])
+            if not clean:
+                continue
+            tag = '#' + clean.lower().replace('-', '').replace('_', '')
+            if tag not in hashtags and len(tag) <= 30:
+                hashtags.append(tag)
+
+        cta = (
+            "\n\n📩 Хочете сучасну ванну кімнату у Франкфурті та околицях? "
+            "Напишіть нам — зробимо безкоштовну консультацію та розрахунок."
+        )
+        caption_parts = [f"🔥 {trend.title}", summary_text]
+        if relevance_text:
+            caption_parts.append(relevance_text)
+        caption = "\n\n".join([p for p in caption_parts if p]) + cta
+
+        idea = ContentIdea(
+            user_id=current_user.id,
+            trend_id=trend.id,
+            title=trend.title,
+            caption=caption,
+            hashtags=hashtags,
+            content_type='trend_based',
+            status='draft',
+            generated_image_url=trend.image_url
+        )
+
+        try:
+            db.session.add(idea)
+            db.session.commit()
+        except Exception as e:
+            db.session.rollback()
+            flash(f'❌ Не вдалося створити чернетку: {e}', 'error')
+            return redirect(url_for('ai_assistant', tab='trends'))
+
+        # Показуємо результат у вкладці "Контент"
+        payload = {
+            'hook': f"🔥 {trend.title}",
+            'caption': caption,
+            'hashtags': hashtags,
+            'content_ideas': [
+                'Використати фото зі статті (якщо доступно) або зробити схожу візуалізацію',
+                'Зробити карусель: тренд → приклад → CTA',
+                'Зняти коротке відео-пояснення 10–15 сек'
+            ]
+        }
+        try:
+            db.session.add(AiCache(user_id=current_user.id, kind='content', payload=payload))
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+        flash('✅ Чернетку створено! Перейдіть у вкладку "Контент для постів".', 'success')
+        return redirect(url_for('ai_assistant', tab='content'))
+
+    @app.route('/ai/automation-settings', methods=['POST'])
+    @login_required
+    def ai_update_automation_settings():
+        """⚙️ Налаштування автоматизації RSS → чернетки → авто-публікація."""
+        enabled = bool(request.form.get('enabled'))
+        auto_publish = bool(request.form.get('auto_publish'))
+        use_animation = bool(request.form.get('use_animation'))
+
+        try:
+            animation_duration_seconds = int(request.form.get('animation_duration_seconds', 8))
+        except Exception:
+            animation_duration_seconds = 8
+
+        try:
+            interval = int(request.form.get('rss_check_interval_minutes', 240))
+        except Exception:
+            interval = 240
+
+        publish_times_raw = (request.form.get('publish_times', '') or '').strip()
+        publish_times = []
+        if publish_times_raw:
+            for part in publish_times_raw.split(','):
+                t = part.strip()
+                if t:
+                    publish_times.append(t)
+
+        timezone_name = (request.form.get('timezone', 'Europe/Berlin') or 'Europe/Berlin').strip()
+
+        try:
+            max_posts_per_day = int(request.form.get('max_posts_per_day', 2))
+        except Exception:
+            max_posts_per_day = 2
+
+        settings = AutomationSettings.query.filter_by(user_id=current_user.id).first()
+        if settings is None:
+            settings = AutomationSettings(user_id=current_user.id)
+            db.session.add(settings)
+
+        settings.enabled = enabled
+        settings.auto_publish = auto_publish
+        settings.use_animation = use_animation
+        settings.rss_check_interval_minutes = max(15, min(interval, 24 * 60))
+        settings.publish_times = publish_times or ["09:00", "18:00"]
+        settings.timezone = timezone_name
+        settings.max_posts_per_day = max(1, min(max_posts_per_day, 10))
+
+        # Optional music file upload
+        music_file = request.files.get('music_file')
+        if music_file and music_file.filename:
+            filename = (music_file.filename or '').strip()
+            _, ext = os.path.splitext(filename)
+            ext = (ext or '').lower()
+            allowed = {'.mp3', '.wav', '.m4a', '.aac'}
+            if ext not in allowed:
+                flash('❌ Непідтримуваний формат музики. Дозволено: mp3, wav, m4a, aac', 'error')
+                return redirect(url_for('ai_assistant', tab='trends'))
+
+            music_dir = os.path.join(os.path.dirname(__file__), 'uploads', 'music')
+            os.makedirs(music_dir, exist_ok=True)
+            stored_name = f"music_{uuid.uuid4().hex}{ext}"
+            full_path = os.path.join(music_dir, stored_name)
+            music_file.save(full_path)
+            # store repo-relative path
+            settings.music_file_path = os.path.join('uploads', 'music', stored_name)
+
+        settings.animation_duration_seconds = max(3, min(animation_duration_seconds, 60))
+        settings.animation_fps = 30
+
+        try:
+            db.session.commit()
+            flash('✅ Налаштування автоматизації збережено', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'❌ Не вдалося зберегти налаштування: {e}', 'error')
+
+        return redirect(url_for('ai_assistant', tab='trends'))
+    
     # ============ ERROR HANDLERS ============
     
     @app.errorhandler(404)
@@ -809,8 +1464,8 @@ if __name__ == '__main__':
     # Создать папку для uploads
     os.makedirs(app.config.get('UPLOAD_FOLDER', 'uploads'), exist_ok=True)
     
-    print("🚀 Запуск Instagram OSINT приложения...")
-    print(f"📍 Сервер: http://127.0.0.1:{os.environ.get('PORT', 5000)}")
+    print("Запуск Instagram OSINT приложения...")
+    print(f"Сервер: http://127.0.0.1:{os.environ.get('PORT', 5000)}")
     
     app.run(
         host='0.0.0.0',

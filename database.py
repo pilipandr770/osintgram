@@ -26,4 +26,4 @@ def init_db(app):
         app: Flask application instance
     """
     with app.app_context():
-        print(f"🗄️ База данных подключена к schema '{SCHEMA_NAME}'")
+        print(f"Database connected to schema '{SCHEMA_NAME}'")
