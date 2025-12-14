@@ -27,6 +27,9 @@
                     <a href="{{ url_for('discover_accounts') }}" class="nav-link {% if request.endpoint == 'discover_accounts' %}active{% endif %}">
                         🔍 Автопошук
                     </a>
+                    <a href="{{ url_for('geo_settings') }}" class="nav-link {% if request.endpoint == 'geo_settings' %}active{% endif %}">
+                        🌍 Гео
+                    </a>
                     <a href="{{ url_for('parse_competitors') }}" class="nav-link {% if request.endpoint == 'parse_competitors' %}active{% endif %}">
                         📊 Аналіз ринку
                     </a>

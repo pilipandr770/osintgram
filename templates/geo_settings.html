@@ -1,0 +1,60 @@
+{% extends 'base.html' %}
+
+{% block title %}Гео-налаштування{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>🌍 Гео-налаштування</h1>
+    <p>Налаштуйте цільовий регіон для автопошуку та визначення релевантності.</p>
+</div>
+
+<div class="card">
+    <h2>🎯 Цільовий регіон</h2>
+
+    <form method="POST" action="{{ url_for('geo_settings') }}" class="account-form">
+        <div class="two-columns" style="grid-template-columns: 1fr 1fr;">
+            <div class="form-group">
+                <label for="region_name">Назва регіону</label>
+                <input type="text" id="region_name" name="region_name" value="{{ geo.region_name }}" placeholder="Frankfurt">
+                <small>Використовується в UI та підписах.</small>
+            </div>
+
+            <div class="form-group">
+                <label for="radius_km">Радіус (км)</label>
+                <input type="number" id="radius_km" name="radius_km" value="{{ geo.radius_km }}" min="0" step="1">
+                <small>Поки що це довідкове значення (для відображення).</small>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="postal_code_regex">Регекс поштових індексів (опціонально)</label>
+            <input type="text" id="postal_code_regex" name="postal_code_regex" value="{{ geo.postal_code_regex }}" placeholder="\\b(6[0-5]\\d{3})\\b">
+            <small>Якщо профіль містить PLZ, це дає високий матч по регіону.</small>
+        </div>
+
+        <div class="form-group">
+            <label for="region_cities">Міста / ключові слова регіону (по одному в рядок)</label>
+            <textarea id="region_cities" name="region_cities" rows="8" placeholder="frankfurt\noffenbach\ndarmstadt">{{ (geo.region_cities or [])|join('\n') }}</textarea>
+            <small>Порівняння робиться по підрядку в bio/location (lowercase).</small>
+        </div>
+
+        <hr style="border:0; border-top:1px solid #eee; margin: 18px 0;">
+
+        <h3>🔎 Автопошук</h3>
+
+        <div class="form-group">
+            <label for="priority_hashtags">Пріоритетні хештеги (по одному в рядок)</label>
+            <textarea id="priority_hashtags" name="priority_hashtags" rows="6" placeholder="fliesenleger\nbadsanierung\nfrankfurtammain">{{ (geo.priority_hashtags or [])|join('\n') }}</textarea>
+            <small>Використовуються для /discover замість жорстко заданих Frankfurt-хештегів.</small>
+        </div>
+
+        <div class="form-group">
+            <label for="suggested_keywords">Ключові слова для пошуку (по одному в рядок)</label>
+            <textarea id="suggested_keywords" name="suggested_keywords" rows="6" placeholder="fliesenleger frankfurt\nrenovierung frankfurt">{{ (geo.suggested_keywords or [])|join('\n') }}</textarea>
+            <small>Використовуються для /discover замість жорстко заданих Frankfurt-фраз.</small>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block">💾 Зберегти</button>
+    </form>
+</div>
+{% endblock %}

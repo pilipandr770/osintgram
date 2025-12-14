@@ -6,7 +6,7 @@
 <div class="discover-page">
     <div class="page-header">
         <h1>🔍 Автопошук схожих акаунтів</h1>
-        <p>Автоматичний пошук сторінок ремонту/кафелю в регіоні Франкфурта</p>
+        <p>Автоматичний пошук сторінок ремонту/кафелю в регіоні {{ geo.region_name }} (+{{ geo.radius_km }} км)</p>
     </div>
     
     <div class="disclaimer-box" style="background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; padding: 15px; margin-bottom: 20px;">
@@ -17,7 +17,11 @@
         <!-- Форма пошуку -->
         <div class="card">
             <h3>🚀 Запустити автопошук</h3>
-            <p class="text-muted">Система знайде акаунти пов'язані з ремонтом та кафелем біля Франкфурта</p>
+            <p class="text-muted">Система знайде акаунти пов'язані з ремонтом та кафелем в регіоні {{ geo.region_name }}</p>
+
+            <p style="margin: 10px 0 0;">
+                <a href="{{ url_for('geo_settings') }}" class="btn btn-small btn-secondary">🌍 Налаштувати гео</a>
+            </p>
             
             <form method="POST" action="{{ url_for('discover_accounts') }}">
                 <div class="form-group">
@@ -42,7 +46,7 @@
                     <h4>🎯 Що шукаємо:</h4>
                     <ul>
                         <li><strong>Ключові слова:</strong> fliesen, fliesenleger, badsanierung, renovierung</li>
-                        <li><strong>Регіон:</strong> Frankfurt, Offenbach, Darmstadt, Mainz, Wiesbaden (+100 км)</li>
+                        <li><strong>Регіон:</strong> {{ geo.region_name }} (+{{ geo.radius_km }} км)</li>
                         <li><strong>Тип:</strong> Бізнес-акаунти, майстри, компанії</li>
                     </ul>
                 </div>
@@ -67,10 +71,9 @@
             </div>
             
             <div style="margin-top: 20px;">
-                <h4>🏙️ Міста в радіусі 100 км:</h4>
+                <h4>🏙️ Ключові міста/зони:</h4>
                 <p style="color: #666; font-size: 14px;">
-                    Frankfurt, Offenbach, Darmstadt, Mainz, Wiesbaden, Hanau, Aschaffenburg, 
-                    Bad Homburg, Rüsselsheim, Bensheim, Heidelberg, Mannheim, Worms...
+                    {{ (geo.region_cities or [])[:18]|map('title')|join(', ') }}{% if (geo.region_cities or [])|length > 18 %}...{% endif %}
                 </p>
             </div>
         </div>
@@ -120,7 +123,7 @@
                             </td>
                             <td>
                                 {% if acc.is_frankfurt_region %}
-                                    <span style="color: green;">📍 {{ acc.detected_city or 'Frankfurt Region' }}</span>
+                                    <span style="color: green;">📍 {{ acc.detected_city or (geo.region_name ~ ' Region') }}</span>
                                 {% else %}
                                     <span style="color: #999;">—</span>
                                 {% endif %}

@@ -117,9 +117,15 @@
                 <div>
                     <label><strong>Аудиторія:</strong></label><br>
                     <select name="audience_type" style="padding: 8px; border: 1px solid #ddd; border-radius: 6px; width: 220px;">
-                        <option value="target">🎯 Цільова аудиторія</option>
-                        <option value="frankfurt">📍 Франкфурт регіон</option>
-                        <option value="all">📋 Всі</option>
+                        <option value="target:new">🆕 Нові контакти (цільові)</option>
+                        <option value="frankfurt:new">🆕 Нові контакти (📍 {{ geo_region_label }})</option>
+                        <option value="all:new">🆕 Нові контакти (всі)</option>
+                        <option value="target:own">👥 Наші підписники (цільові)</option>
+                        <option value="frankfurt:own">👥 Наші підписники (📍 {{ geo_region_label }})</option>
+                        <option value="all:own">👥 Наші підписники (всі)</option>
+                        <option value="target">🎯 Усі контакти (цільові) — legacy</option>
+                        <option value="frankfurt">📍 {{ geo_region_label }} — legacy</option>
+                        <option value="all">📋 Всі — legacy</option>
                     </select>
                 </div>
                 <div>
@@ -129,9 +135,9 @@
                 </div>
                 <div>
                     <label><strong>Delay (сек):</strong></label><br>
-                    <input type="number" name="min_delay_seconds" min="10" max="600" value="45"
+                      <input type="number" name="min_delay_seconds" min="30" max="3600" value="180"
                            style="padding: 8px; border: 1px solid #ddd; border-radius: 6px; width: 110px;"> -
-                    <input type="number" name="max_delay_seconds" min="10" max="600" value="75"
+                      <input type="number" name="max_delay_seconds" min="30" max="3600" value="300"
                            style="padding: 8px; border: 1px solid #ddd; border-radius: 6px; width: 110px;">
                 </div>
                   <div>
@@ -203,7 +209,7 @@
         <ul>
             <li><strong>Нові акаунти:</strong> 10-20 повідомлень на день</li>
             <li><strong>Старі акаунти (6+ місяців):</strong> 50-80 повідомлень на день</li>
-            <li><strong>Затримка між повідомленнями:</strong> мінімум 30-60 секунд</li>
+            <li><strong>Затримка між запрошеннями:</strong> рекомендуємо 180-300 секунд (3-5 хв)</li>
             <li><strong>Ризики:</strong> тимчасовий бан, обмеження функцій, блокування акаунта</li>
         </ul>
         <p>💡 Рекомендуємо: персоналізовані повідомлення, не більше 20 на день, природні затримки.</p>
@@ -255,7 +261,7 @@
                     </label>
                     <label style="display: flex; align-items: center; gap: 5px;">
                         <input type="radio" name="audience" value="frankfurt"> 
-                        📍 Регіон Франкфурт ({{ frankfurt_region }})
+                        📍 {{ geo_region_label }} ({{ frankfurt_region }})
                     </label>
                     <label style="display: flex; align-items: center; gap: 5px;">
                         <input type="radio" name="audience" value="all"> 
@@ -510,9 +516,11 @@ function _setSelectValue(selectEl, value) {
         if (step3Offset) step3Offset.value = (steps[2] && steps[2].offset_hours != null) ? steps[2].offset_hours : (step3Offset.value || 120);
     }
 
-    select.addEventListener('change', (e) => applyDmPrefill(e.target.value));
+    select.addEventListener('change', apply);
+    apply();
 })();
 
+</script>
 
 <style>
 .template-btn:hover {

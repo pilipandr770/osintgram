@@ -2,7 +2,7 @@
 Модуль автоматичного пошуку схожих сторінок та геолокації.
 Для пошуку цільової аудиторії в Instagram.
 """
-from typing import List, Dict, Optional, Set
+from typing import List, Dict, Optional, Set, Any
 import re
 
 # ============ ГЕОЛОКАЦІЯ: Міста в радіусі 100 км від Франкфурта ============
@@ -54,6 +54,84 @@ FRANKFURT_REGION_CITIES = [
 
 # Німецькі поштові індекси Франкфуртського регіону (60xxx - 65xxx)
 FRANKFURT_POSTAL_CODES = [f"{i}" for i in range(60000, 66000)]
+
+
+# ============ DEFAULT GEO CONFIG (customizable per user) ============
+
+DEFAULT_REGION_NAME = 'Frankfurt'
+DEFAULT_RADIUS_KM = 100
+DEFAULT_POSTAL_CODE_REGEX = r'\b(6[0-5]\d{3})\b'
+
+DEFAULT_HIGH_CONFIDENCE_CITIES = ["frankfurt", "offenbach", "darmstadt", "mainz", "wiesbaden"]
+
+DEFAULT_PRIORITY_HASHTAGS = [
+    'fliesenleger', 'fliesen', 'badsanierung',
+    'frankfurtammain', 'renovierung', 'handwerker'
+]
+
+DEFAULT_SUGGESTED_KEYWORDS = [
+    "fliesenleger frankfurt",
+    "badsanierung frankfurt",
+    "renovierung frankfurt",
+    "handwerker frankfurt",
+    "fliesen rhein-main",
+    "badezimmer design frankfurt",
+    "innenausbau frankfurt",
+    "bodenleger frankfurt",
+]
+
+
+def get_default_geo_config() -> Dict[str, Any]:
+    return {
+        'region_name': DEFAULT_REGION_NAME,
+        'radius_km': DEFAULT_RADIUS_KM,
+        'region_cities': list(FRANKFURT_REGION_CITIES),
+        'postal_code_regex': DEFAULT_POSTAL_CODE_REGEX,
+        'high_confidence_cities': list(DEFAULT_HIGH_CONFIDENCE_CITIES),
+        'priority_hashtags': list(DEFAULT_PRIORITY_HASHTAGS),
+        'suggested_keywords': list(DEFAULT_SUGGESTED_KEYWORDS),
+    }
+
+
+def normalize_geo_config(geo_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    cfg = get_default_geo_config()
+    if geo_config:
+        for k, v in geo_config.items():
+            if v is None:
+                continue
+            cfg[k] = v
+
+    # Normalize lists
+    cities = cfg.get('region_cities') or []
+    if isinstance(cities, str):
+        cities = [c.strip() for c in cities.replace(',', '\n').split('\n') if c.strip()]
+    cfg['region_cities'] = [str(c).strip().lower() for c in cities if str(c).strip()]
+
+    hi = cfg.get('high_confidence_cities') or []
+    if isinstance(hi, str):
+        hi = [c.strip() for c in hi.replace(',', '\n').split('\n') if c.strip()]
+    cfg['high_confidence_cities'] = [str(c).strip().lower() for c in hi if str(c).strip()]
+
+    ph = cfg.get('priority_hashtags') or []
+    if isinstance(ph, str):
+        ph = [c.strip() for c in ph.replace(',', '\n').split('\n') if c.strip()]
+    cfg['priority_hashtags'] = [str(c).strip().lower().lstrip('#') for c in ph if str(c).strip()]
+
+    sk = cfg.get('suggested_keywords') or []
+    if isinstance(sk, str):
+        sk = [c.strip() for c in sk.replace(',', '\n').split('\n') if c.strip()]
+    cfg['suggested_keywords'] = [str(c).strip() for c in sk if str(c).strip()]
+
+    # Basic scalars
+    try:
+        cfg['radius_km'] = int(cfg.get('radius_km') or DEFAULT_RADIUS_KM)
+    except Exception:
+        cfg['radius_km'] = DEFAULT_RADIUS_KM
+
+    cfg['region_name'] = str(cfg.get('region_name') or DEFAULT_REGION_NAME).strip()[:120]
+    cfg['postal_code_regex'] = str(cfg.get('postal_code_regex') or DEFAULT_POSTAL_CODE_REGEX).strip()[:160]
+
+    return cfg
 
 
 # ============ КЛЮЧОВІ СЛОВА ДЛЯ РЕМОНТУ/КАФЕЛЮ ============
@@ -115,7 +193,7 @@ HASHTAGS_SEARCH = [
 ]
 
 
-def check_location_match(bio: str, location: str = None) -> Dict:
+def check_location_match(bio: str, location: str = None, geo_config: Optional[Dict[str, Any]] = None) -> Dict:
     """
     Перевірити, чи профіль знаходиться в регіоні Франкфурта.
     
@@ -126,10 +204,14 @@ def check_location_match(bio: str, location: str = None) -> Dict:
     Returns:
         Dict: {matched: bool, city: str or None, confidence: str}
     """
+    cfg = normalize_geo_config(geo_config)
     text = f"{bio or ''} {location or ''}".lower()
     
     # Перевіряємо поштові індекси
-    postal_match = re.search(r'\b(6[0-5]\d{3})\b', text)
+    try:
+        postal_match = re.search(cfg.get('postal_code_regex') or DEFAULT_POSTAL_CODE_REGEX, text)
+    except re.error:
+        postal_match = re.search(DEFAULT_POSTAL_CODE_REGEX, text)
     if postal_match:
         return {
             "matched": True,
@@ -138,12 +220,12 @@ def check_location_match(bio: str, location: str = None) -> Dict:
         }
     
     # Перевіряємо міста
-    for city in FRANKFURT_REGION_CITIES:
+    for city in (cfg.get('region_cities') or FRANKFURT_REGION_CITIES):
         if city in text:
             return {
                 "matched": True,
                 "city": city.title(),
-                "confidence": "high" if city in ["frankfurt", "offenbach", "darmstadt", "mainz", "wiesbaden"] else "medium"
+                "confidence": "high" if city in (cfg.get('high_confidence_cities') or DEFAULT_HIGH_CONFIDENCE_CITIES) else "medium"
             }
     
     # Перевіряємо "Німеччина" без конкретного міста
@@ -201,16 +283,17 @@ def check_interest_match(bio: str, category: str = None) -> Dict:
     }
 
 
-def get_search_hashtags(category: str = "all") -> List[str]:
-    """
-    Отримати список хештегів для пошуку.
-    
+def get_search_hashtags(category: str = "all", geo_config: Optional[Dict[str, Any]] = None) -> List[str]:
+    """Отримати список хештегів для пошуку.
+
     Args:
         category: "tiles", "bathroom", "renovation", "region", "all"
-        
+        geo_config: Optional overrides (per-user geo settings)
+
     Returns:
         List[str]: Список хештегів
     """
+    cfg = normalize_geo_config(geo_config)
     if category == "tiles":
         return [h for h in HASHTAGS_SEARCH if "fliesen" in h or "tile" in h]
     elif category == "bathroom":
@@ -218,45 +301,41 @@ def get_search_hashtags(category: str = "all") -> List[str]:
     elif category == "renovation":
         return [h for h in HASHTAGS_SEARCH if "renovierung" in h or "sanierung" in h or "handwerk" in h]
     elif category == "region":
+        # If user configured priority hashtags, use them as the region set.
+        if cfg.get('priority_hashtags'):
+            return list(cfg['priority_hashtags'])
         return [h for h in HASHTAGS_SEARCH if any(city in h for city in ["frankfurt", "offenbach", "darmstadt", "mainz", "wiesbaden", "rheinmain"])]
     else:
+        # For 'all': prefer putting configured priority hashtags first.
+        if cfg.get('priority_hashtags'):
+            merged = []
+            seen = set()
+            for h in list(cfg['priority_hashtags']) + list(HASHTAGS_SEARCH):
+                hh = str(h).strip().lower().lstrip('#')
+                if not hh or hh in seen:
+                    continue
+                seen.add(hh)
+                merged.append(hh)
+            return merged
         return HASHTAGS_SEARCH
 
 
-def get_suggested_accounts_keywords() -> List[str]:
+def get_suggested_accounts_keywords(geo_config: Optional[Dict[str, Any]] = None) -> List[str]:
     """
     Отримати ключові слова для пошуку схожих акаунтів.
     
     Returns:
         List[str]: Ключові слова для пошуку
     """
-    return [
-        "fliesenleger frankfurt",
-        "badsanierung frankfurt",
-        "renovierung frankfurt",
-        "handwerker frankfurt",
-        "fliesen rhein-main",
-        "badezimmer design frankfurt",
-        "innenausbau frankfurt",
-        "bodenleger frankfurt",
-    ]
+    cfg = normalize_geo_config(geo_config)
+    return list(cfg.get('suggested_keywords') or DEFAULT_SUGGESTED_KEYWORDS)
 
 
-def analyze_profile_relevance(username: str, bio: str, location: str = None, 
-                              category: str = None, followers_count: int = 0) -> Dict:
-    """
-    Повний аналіз релевантності профілю.
-    
-    Returns:
-        Dict: {
-            relevant: bool,
-            location_match: Dict,
-            interest_match: Dict,
-            total_score: int,
-            recommendation: str
-        }
-    """
-    location_result = check_location_match(bio, location)
+def analyze_profile_relevance(username: str, bio: str, location: str = None,
+                              category: str = None, followers_count: int = 0,
+                              geo_config: Optional[Dict[str, Any]] = None) -> Dict:
+    """Повний аналіз релевантності профілю."""
+    location_result = check_location_match(bio, location, geo_config=geo_config)
     interest_result = check_interest_match(bio, category)
     
     # Загальний score

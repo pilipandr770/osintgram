@@ -7,10 +7,10 @@ from flask_login import LoginManager, login_required, current_user
 from flask_migrate import Migrate
 from config import config
 from database import db, init_db
-from models import User, InstagramAccount, Follower, ParseSession, PublishedContent, ExportHistory, MessageLog, SentMessage, RssTrend, ContentIdea, AutomationSettings, AiCache, DiscoverCache, DmAssistantSettings, InviteCampaignSettings
+from models import User, InstagramAccount, Follower, ParseSession, PublishedContent, ExportHistory, MessageLog, SentMessage, RssTrend, ContentIdea, AutomationSettings, AiCache, GeoSettings, DiscoverCache, DmAssistantSettings, InviteCampaignSettings
 from instagram_service import InstagramService
 from encryption import encrypt_password, decrypt_password
-from geo_search import analyze_profile_relevance, HASHTAGS_SEARCH
+from geo_search import normalize_geo_config, get_search_hashtags
 from ai_service import analyze_profile, generate_personalized_message, generate_post_content, batch_analyze_profiles, summarize_trend, OPENAI_API_KEY
 from rss_service import get_trending_topics, generate_content_ideas_from_trends
 from auth import auth_bp
@@ -73,6 +73,20 @@ def create_app(config_name=None):
         # Затем создаём таблицы
         db.create_all()
         print(f"Все таблицы созданы в schema '{SCHEMA_NAME}'")
+
+    def _get_geo_config_for_user(user_id: str):
+        row = GeoSettings.query.filter_by(user_id=user_id).first()
+        geo_overrides = None
+        if row is not None:
+            geo_overrides = {
+                'region_name': row.region_name,
+                'radius_km': row.radius_km,
+                'region_cities': row.region_cities,
+                'postal_code_regex': row.postal_code_regex,
+                'priority_hashtags': row.priority_hashtags,
+                'suggested_keywords': row.suggested_keywords,
+            }
+        return normalize_geo_config(geo_overrides)
     
     # ============ ROUTES ============
     
@@ -410,7 +424,8 @@ def create_app(config_name=None):
                 
                 # 🔍 Пошук схожих акаунтів
                 flash('🔍 Шукаємо схожі акаунти... Це може зайняти 1-2 хвилини', 'info')
-                discovered = service.discover_similar_accounts()
+                geo_cfg = _get_geo_config_for_user(current_user.id)
+                discovered = service.discover_similar_accounts(geo_config=geo_cfg)
 
                 # Зберігаємо server-side в БД (а не в cookie-session)
                 top = discovered[:30]
@@ -450,12 +465,71 @@ def create_app(config_name=None):
         discovered = (last_cache.payload or []) if last_cache else []
         selected_instagram_account_id = last_cache.instagram_account_id if last_cache else ''
         accounts = InstagramAccount.query.filter_by(user_id=current_user.id).all()
+
+        geo_cfg = _get_geo_config_for_user(current_user.id)
+        hashtags = get_search_hashtags('all', geo_config=geo_cfg)
         
         return render_template('discover.html', 
                                accounts=accounts, 
                                discovered=discovered,
-                       hashtags=HASHTAGS_SEARCH[:10],
-                       selected_instagram_account_id=selected_instagram_account_id)
+                               hashtags=hashtags[:10],
+                               selected_instagram_account_id=selected_instagram_account_id,
+                               geo=geo_cfg)
+
+    @app.route('/settings/geo', methods=['GET', 'POST'])
+    @login_required
+    def geo_settings():
+        """🌍 Geo targeting settings (per user)."""
+        user_id = current_user.id
+
+        settings = GeoSettings.query.filter_by(user_id=user_id).first()
+        geo_cfg = _get_geo_config_for_user(user_id)
+
+        def _split_lines(value: str):
+            raw = (value or '').strip()
+            if not raw:
+                return []
+            raw = raw.replace(',', '\n')
+            parts = [p.strip() for p in raw.split('\n') if p.strip()]
+            return parts
+
+        if request.method == 'POST':
+            region_name = (request.form.get('region_name') or '').strip()[:120]
+            postal_code_regex = (request.form.get('postal_code_regex') or '').strip()[:160]
+
+            try:
+                radius_km = int(request.form.get('radius_km') or geo_cfg.get('radius_km') or 100)
+            except Exception:
+                radius_km = int(geo_cfg.get('radius_km') or 100)
+
+            region_cities = _split_lines(request.form.get('region_cities'))
+            priority_hashtags = [h.lstrip('#').strip() for h in _split_lines(request.form.get('priority_hashtags'))]
+            suggested_keywords = _split_lines(request.form.get('suggested_keywords'))
+
+            if settings is None:
+                settings = GeoSettings(user_id=user_id)
+                db.session.add(settings)
+
+            if region_name:
+                settings.region_name = region_name
+            settings.radius_km = radius_km
+
+            settings.region_cities = region_cities
+            settings.postal_code_regex = postal_code_regex or None
+            settings.priority_hashtags = priority_hashtags
+            settings.suggested_keywords = suggested_keywords
+
+            try:
+                db.session.commit()
+                flash('✅ Гео-налаштування збережено', 'success')
+            except Exception as e:
+                db.session.rollback()
+                flash(f'❌ Не вдалося зберегти гео-налаштування: {str(e)}', 'error')
+
+            return redirect(url_for('geo_settings'))
+
+        # GET
+        return render_template('geo_settings.html', geo=geo_cfg, settings=settings)
     
     @app.route('/import', methods=['POST'])
     @login_required
@@ -939,6 +1013,8 @@ def create_app(config_name=None):
         total_followers = Follower.query.filter_by(user_id=user_id).count()
         target_audience = Follower.query.filter_by(user_id=user_id, is_target_audience=True).count()
         frankfurt_region = Follower.query.filter_by(user_id=user_id, is_frankfurt_region=True).count()
+        geo_cfg = _get_geo_config_for_user(user_id)
+        geo_region_label = f"{geo_cfg.get('region_name') or 'Region'} (+{geo_cfg.get('radius_km') or 0} км)"
         
         # Скільки повідомлень відправлено сьогодні
         from datetime import date
@@ -997,6 +1073,7 @@ def create_app(config_name=None):
             total_followers=total_followers,
             target_audience=target_audience,
             frankfurt_region=frankfurt_region,
+            geo_region_label=geo_region_label,
             messages_sent_today=messages_sent_today,
             daily_limit=daily_limit,
             accounts=accounts,
@@ -1111,8 +1188,16 @@ def create_app(config_name=None):
         settings.enabled = enabled
         settings.audience_type = audience_type or 'target'
         settings.max_sends_per_day = max(1, min(max_sends_per_day, 500))
-        settings.min_delay_seconds = max(1, min(min_delay_seconds, 3600))
-        settings.max_delay_seconds = max(1, min(max_delay_seconds, 3600))
+        # Keep safe bounds. For new-contacts outreach we enforce >= 180s.
+        at_lower = (audience_type or 'target').strip().lower()
+        is_new_contacts = (':new' in at_lower) or at_lower.endswith('new')
+        effective_min = max(1, min(min_delay_seconds, 3600))
+        effective_max = max(1, min(max_delay_seconds, 3600))
+        if is_new_contacts:
+            effective_min = max(effective_min, 180)
+            effective_max = max(effective_max, effective_min)
+        settings.min_delay_seconds = effective_min
+        settings.max_delay_seconds = effective_max
         settings.stop_on_inbound_reply = stop_on_inbound_reply
         settings.allowed_start_hour = max(0, min(int(allowed_start_hour), 23))
         settings.allowed_end_hour = max(0, min(int(allowed_end_hour), 23))

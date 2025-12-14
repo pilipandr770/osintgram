@@ -479,6 +479,32 @@ class AiCache(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 
+class GeoSettings(db.Model):
+    """Per-user geo configuration (region/cities/postal codes) for targeting and discovery."""
+    __tablename__ = 'geo_settings'
+    __table_args__ = (
+        db.Index('idx_geo_settings_user', 'user_id', unique=True),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), nullable=False)
+
+    region_name = db.Column(db.String(120), default='Frankfurt')
+    radius_km = db.Column(db.Integer, default=100)
+
+    # Keyword-based region match
+    region_cities = db.Column(db.JSON)  # ['frankfurt', 'offenbach', ...]
+    postal_code_regex = db.Column(db.String(160))  # e.g. r'\b(6[0-5]\d{3})\b'
+
+    # Discovery helpers (optional overrides)
+    priority_hashtags = db.Column(db.JSON)  # ['fliesen', 'frankfurt', ...]
+    suggested_keywords = db.Column(db.JSON)  # ['fliesenleger frankfurt', ...]
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class DiscoverCache(db.Model):
     """Кеш результатів /discover (щоб не зберігати великі дані в cookie-session)."""
     __tablename__ = 'discover_cache'

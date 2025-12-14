@@ -43,7 +43,8 @@ def _is_within_allowed_hours(settings: InviteCampaignSettings, now_utc: Optional
     try:
         tz = ZoneInfo(tz_name)
     except Exception:
-        tz = ZoneInfo('Europe/Berlin')
+        # Some Windows/Python builds may not have tzdata; fall back to UTC.
+        tz = timezone.utc
 
     start = int(getattr(settings, 'allowed_start_hour', 8) or 8)
     end = int(getattr(settings, 'allowed_end_hour', 22) or 22)
@@ -93,21 +94,60 @@ def _count_sent_today(user_id: str, account_id: str) -> int:
     ).count()
 
 
+def _parse_audience_type(audience_type: str) -> Tuple[str, str]:
+    """Return (segment, group).
+
+    segment: target|frankfurt|all
+    group: any|new|own
+
+    We store this as a single string for backward compatibility, e.g.:
+    - 'target' (legacy)
+    - 'target:new' (only contacts collected from competitors)
+    - 'target:own' (only contacts collected from our own account)
+    """
+    raw = (audience_type or 'target').strip().lower()
+    if ':' in raw:
+        seg, grp = raw.split(':', 1)
+    else:
+        seg, grp = raw, 'any'
+
+    seg = seg if seg in {'target', 'frankfurt', 'all'} else 'target'
+    if grp in {'new', 'prospects'}:
+        grp = 'new'
+    elif grp in {'own', 'mine', 'my'}:
+        grp = 'own'
+    else:
+        grp = 'any'
+
+    return seg, grp
+
+
 def _pick_new_followers(
     user_id: str,
     audience_type: str,
     account_id: str,
+    my_account_username: str,
     limit: int,
 ) -> List[Follower]:
     # Base follower query
     q = Follower.query.filter(Follower.user_id == user_id)
-    if audience_type == 'frankfurt':
+
+    segment, group = _parse_audience_type(audience_type)
+    if segment == 'frankfurt':
         q = q.filter(Follower.is_frankfurt_region.is_(True))
-    elif audience_type == 'target':
+    elif segment == 'target':
         q = q.filter(Follower.is_target_audience.is_(True))
     else:
         # all
         pass
+
+    # Group split: "new contacts" vs "our followers"
+    my_u = (my_account_username or '').strip().lstrip('@').lower()
+    if my_u:
+        if group == 'new':
+            q = q.filter(db.func.lower(Follower.source_account_username) != my_u)
+        elif group == 'own':
+            q = q.filter(db.func.lower(Follower.source_account_username) == my_u)
 
     # Exclude already-enrolled recipients for this account
     subq = db.session.query(InviteCampaignRecipient.recipient_username).filter(
@@ -304,6 +344,12 @@ def _run_for_account(
     if max_delay < min_delay:
         max_delay = min_delay
 
+    # Anti-spam: for "new contacts" outreach, enforce at least 3 minutes between sends.
+    _, audience_group = _parse_audience_type(getattr(settings, 'audience_type', None) or 'target')
+    if audience_group == 'new':
+        min_delay = max(min_delay, 180)
+        max_delay = max(max_delay, min_delay)
+
     sent = 0
     stopped = 0
     completed = 0
@@ -317,6 +363,7 @@ def _run_for_account(
                 user_id=user_id,
                 audience_type=settings.audience_type or 'target',
                 account_id=account_id,
+                my_account_username=account.instagram_username,
                 limit=25,
             )
             if not new_followers:

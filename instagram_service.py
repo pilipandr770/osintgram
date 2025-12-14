@@ -640,9 +640,9 @@ class InstagramService:
             print(f"❌ Помилка пошуку по ключовому слову '{keyword}': {e}")
             return []
     
-    def discover_similar_accounts(self, seed_usernames: List[str] = None) -> List[Dict]:
+    def discover_similar_accounts(self, seed_usernames: List[str] = None, geo_config: Dict = None) -> List[Dict]:
         """
-        Автоматичний пошук схожих акаунтів (ремонт/кафель біля Франкфурта).
+        Автоматичний пошук схожих акаунтів (ремонт/кафель) з урахуванням geo_config.
         Комбінує пошук по хештегах та ключових словах.
         
         Args:
@@ -652,18 +652,18 @@ class InstagramService:
             List[Dict]: список знайдених акаунтів з оцінкою релевантності
         """
         from geo_search import (
-            HASHTAGS_SEARCH, 
+            get_search_hashtags,
             get_suggested_accounts_keywords,
-            analyze_profile_relevance
+            analyze_profile_relevance,
+            normalize_geo_config,
         )
+
+        geo_cfg = normalize_geo_config(geo_config)
         
         all_accounts = {}
         
-        # 1. Пошук по хештегах (кафель + регіон)
-        priority_hashtags = [
-            'fliesenleger', 'fliesen', 'badsanierung',
-            'frankfurtammain', 'renovierung', 'handwerker'
-        ]
+        # 1. Пошук по хештегах
+        priority_hashtags = list(geo_cfg.get('priority_hashtags') or get_search_hashtags('region', geo_config=geo_cfg) or [])
         
         for hashtag in priority_hashtags[:6]:  # Лімітуємо запити
             try:
@@ -675,12 +675,7 @@ class InstagramService:
                 print(f"⚠️ Пропускаємо хештег #{hashtag}: {e}")
         
         # 2. Пошук по ключових словах
-        keywords = [
-            'fliesenleger frankfurt',
-            'badsanierung frankfurt', 
-            'renovierung frankfurt',
-            'fliesen rhein-main'
-        ]
+        keywords = list(get_suggested_accounts_keywords(geo_config=geo_cfg) or [])
         
         for keyword in keywords[:4]:
             try:
@@ -701,7 +696,8 @@ class InstagramService:
                     relevance = analyze_profile_relevance(
                         username=username,
                         bio=user_info.get('biography', ''),
-                        followers_count=user_info.get('followers_count', 0)
+                        followers_count=user_info.get('followers_count', 0),
+                        geo_config=geo_cfg,
                     )
                     
                     enriched_accounts.append({
