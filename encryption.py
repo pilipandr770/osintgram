@@ -6,6 +6,24 @@ import os
 from cryptography.fernet import Fernet
 from base64 import urlsafe_b64encode, urlsafe_b64decode
 import hashlib
+import re
+
+
+_B64URL_RE = re.compile(r'^[A-Za-z0-9_-]+={0,2}$')
+
+
+def _looks_like_fernet_token(value: str) -> bool:
+    if not value:
+        return False
+    s = value.strip()
+    # Fernet tokens are urlsafe-base64 and typically start with 'gAAAA' (version+timestamp)
+    if s.startswith('gAAAA'):
+        return True
+    if len(s) < 80:
+        return False
+    if ' ' in s or '\n' in s or '\r' in s or '\t' in s:
+        return False
+    return bool(_B64URL_RE.match(s))
 
 
 def get_encryption_key() -> bytes:
@@ -66,6 +84,13 @@ def decrypt_password(encrypted_password: str) -> str:
         decrypted = fernet.decrypt(encrypted_password.encode())
         return decrypted.decode()
     except Exception as e:
-        print(f"Помилка розшифрування: {e}")
-        # Якщо не вдалося розшифрувати - можливо пароль ще не зашифрований
+        # InvalidToken often renders as empty string, so include type.
+        err_name = type(e).__name__
+        err_msg = str(e) or '(no message)'
+        print(f"Помилка розшифрування ({err_name}): {err_msg}")
+
+        # Backward-compat: if DB contains plaintext, return as-is.
+        # If it looks like a Fernet token but can't be decrypted, do NOT return it (it would be used as a password).
+        if _looks_like_fernet_token(encrypted_password):
+            return ""
         return encrypted_password

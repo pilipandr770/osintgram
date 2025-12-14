@@ -47,6 +47,58 @@ def get_openai_client():
         return None
 
 
+def generate_dm_reply(system_instructions: str, messages: List[Dict], language: str = 'ru') -> str:
+    """Generate a short DM reply.
+
+    Args:
+        system_instructions: user-defined instructions (system prompt)
+        messages: list of dicts: {"role": "user"|"assistant", "content": "..."}
+        language: ru|uk|de|en
+    """
+    client = get_openai_client()
+    if not client:
+        return "Дякуємо за повідомлення! Підкажіть, будь ласка, у якому місті ви знаходитесь і що саме плануєте (ванна/плитка), щоб ми могли зорієнтувати?"
+
+    lang_hint = {
+        'ru': 'Russian',
+        'uk': 'Ukrainian',
+        'de': 'German',
+        'en': 'English'
+    }.get((language or 'ru').lower(), 'Russian')
+
+    sys = (
+        "You are an assistant replying to Instagram Direct messages. "
+        "Keep replies short and helpful (1-5 sentences). "
+        "Ask at most 1-2 clarifying questions. "
+        "Do not claim you performed actions you cannot do. "
+        "Do not ask for sensitive personal data. "
+        f"Reply in {lang_hint}. "
+        "If user asks for a price, give a rough range or say you need details and offer a free consultation. "
+        "Business context:\n" + BUSINESS_CONTEXT.strip() + "\n\n" +
+        "User instructions:\n" + (system_instructions or '').strip()
+    ).strip()
+
+    chat_messages = [{"role": "system", "content": sys}]
+    for m in (messages or [])[-12:]:
+        role = m.get('role')
+        content = (m.get('content') or '').strip()
+        if role in {'user', 'assistant'} and content:
+            chat_messages.append({"role": role, "content": content})
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=chat_messages,
+            temperature=0.4,
+            max_tokens=220,
+        )
+        text = (response.choices[0].message.content or '').strip()
+        return text
+    except Exception as e:
+        print(f"AI dm reply error: {e}")
+        return "Дякуємо за повідомлення! Підкажіть, будь ласка, ваш район/місто та що саме плануєте (ванна кімната, плитка), і ми запропонуємо варіант." 
+
+
 def analyze_profile(username: str, bio: str, followers_count: int = 0, 
                    posts_count: int = 0, is_business: bool = False) -> Dict:
     """

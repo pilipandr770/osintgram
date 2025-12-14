@@ -233,6 +233,11 @@ def publish_due_content(user_id: str, limit: int = 3) -> int:
         return 0
 
     password = decrypt_password(account.instagram_password)
+    if not password:
+        settings.last_error = 'decrypt_failed: set ENCRYPTION_KEY (or same SECRET_KEY) to decrypt instagram_password'
+        db.session.commit()
+        return 0
+
     service = InstagramService(account.instagram_username, password)
     ok, msg = service.login()
     if not ok:

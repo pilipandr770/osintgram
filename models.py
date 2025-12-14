@@ -477,3 +477,182 @@ class AiCache(db.Model):
     kind = db.Column(db.String(50), nullable=False)  # analysis|message|content
     payload = db.Column(db.JSON)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+# ============ DM ASSISTANT (AUTO-REPLY) ============
+
+class DmAssistantSettings(db.Model):
+    """Per-account Direct auto-reply settings driven by OpenAI."""
+    __tablename__ = 'dm_assistant_settings'
+    __table_args__ = (
+        db.Index('idx_dm_assistant_settings_user', 'user_id'),
+        db.Index('idx_dm_assistant_settings_user_account', 'user_id', 'instagram_account_id', unique=True),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), nullable=False)
+    instagram_account_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.instagram_accounts.id'), nullable=False)
+
+    enabled = db.Column(db.Boolean, default=False)
+    system_instructions = db.Column(db.Text)
+    language = db.Column(db.String(16), default='ru')
+
+    max_replies_per_day = db.Column(db.Integer, default=20)
+    min_delay_seconds = db.Column(db.Integer, default=15)
+    max_delay_seconds = db.Column(db.Integer, default=45)
+
+    # If false, first time we see a thread we only store cursor and do not reply.
+    reply_to_existing_threads = db.Column(db.Boolean, default=False)
+
+    last_run_at = db.Column(db.DateTime)
+    last_error = db.Column(db.Text)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DmThreadState(db.Model):
+    """Stores last seen message cursor per thread to avoid duplicate replies."""
+    __tablename__ = 'dm_thread_state'
+    __table_args__ = (
+        db.Index('idx_dm_thread_state_user', 'user_id'),
+        db.Index('idx_dm_thread_state_user_account', 'user_id', 'instagram_account_id'),
+        db.Index('idx_dm_thread_state_thread', 'instagram_account_id', 'thread_id', unique=True),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), nullable=False)
+    instagram_account_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.instagram_accounts.id'), nullable=False)
+    thread_id = db.Column(db.String(128), nullable=False)
+
+    last_seen_item_id = db.Column(db.String(128))
+    last_seen_at = db.Column(db.DateTime)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class DmMessage(db.Model):
+    """Stores inbound/outbound messages for context and audit."""
+    __tablename__ = 'dm_messages'
+    __table_args__ = (
+        db.Index('idx_dm_messages_user', 'user_id'),
+        db.Index('idx_dm_messages_thread', 'instagram_account_id', 'thread_id'),
+        db.Index('idx_dm_messages_item', 'instagram_account_id', 'thread_id', 'item_id', unique=True),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), nullable=False)
+    instagram_account_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.instagram_accounts.id'), nullable=False)
+
+    thread_id = db.Column(db.String(128), nullable=False)
+    item_id = db.Column(db.String(128), nullable=False)
+
+    direction = db.Column(db.String(8), nullable=False)  # in|out
+    sender_user_id = db.Column(db.String(128))
+    sender_username = db.Column(db.String(255))
+    text = db.Column(db.Text)
+    sent_at = db.Column(db.DateTime)
+
+    processed = db.Column(db.Boolean, default=False)
+    reply_text = db.Column(db.Text)
+    replied_at = db.Column(db.DateTime)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+# ============ INVITE CAMPAIGN (AUTO OUTREACH) ============
+
+
+class InviteCampaignSettings(db.Model):
+    """Per-account automated outreach program (multi-step templates + timing)."""
+    __tablename__ = 'invite_campaign_settings'
+    __table_args__ = (
+        db.Index('idx_invite_campaign_settings_user', 'user_id'),
+        db.Index('idx_invite_campaign_settings_user_account', 'user_id', 'instagram_account_id', unique=True),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), nullable=False)
+    instagram_account_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.instagram_accounts.id'), nullable=False)
+
+    enabled = db.Column(db.Boolean, default=False)
+    audience_type = db.Column(db.String(50), default='target')  # target|frankfurt|all
+
+    max_sends_per_day = db.Column(db.Integer, default=20)
+    min_delay_seconds = db.Column(db.Integer, default=45)
+    max_delay_seconds = db.Column(db.Integer, default=75)
+
+    # Program steps, e.g. [{"offset_hours":0,"template":"..."},{"offset_hours":48,...}]
+    steps = db.Column(db.JSON)
+
+    stop_on_inbound_reply = db.Column(db.Boolean, default=True)
+
+    last_run_at = db.Column(db.DateTime)
+    last_error = db.Column(db.Text)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class InviteCampaignRecipient(db.Model):
+    """Recipient state for a campaign program."""
+    __tablename__ = 'invite_campaign_recipients'
+    __table_args__ = (
+        db.Index('idx_invite_campaign_rec_user', 'user_id'),
+        db.Index('idx_invite_campaign_rec_account', 'instagram_account_id'),
+        db.Index('idx_invite_campaign_rec_status', 'status'),
+        db.Index('idx_invite_campaign_rec_due', 'next_send_at'),
+        db.Index('idx_invite_campaign_rec_unique', 'instagram_account_id', 'recipient_username', unique=True),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), nullable=False)
+    instagram_account_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.instagram_accounts.id'), nullable=False)
+
+    recipient_username = db.Column(db.String(255), nullable=False)
+    recipient_user_id = db.Column(db.String(255))
+
+    status = db.Column(db.String(32), default='active')  # active|stopped|completed|failed
+    current_step = db.Column(db.Integer, default=0)
+
+    thread_id = db.Column(db.String(128))
+    last_outbound_at = db.Column(db.DateTime)
+    last_inbound_at = db.Column(db.DateTime)
+
+    enrolled_at = db.Column(db.DateTime, default=datetime.utcnow)
+    next_send_at = db.Column(db.DateTime, index=True)
+    completed_at = db.Column(db.DateTime)
+    last_error = db.Column(db.Text)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class InviteCampaignSend(db.Model):
+    """Audit log of campaign sends."""
+    __tablename__ = 'invite_campaign_sends'
+    __table_args__ = (
+        db.Index('idx_invite_campaign_send_user', 'user_id'),
+        db.Index('idx_invite_campaign_send_account', 'instagram_account_id'),
+        db.Index('idx_invite_campaign_send_recipient', 'instagram_account_id', 'recipient_username'),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), nullable=False)
+    instagram_account_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.instagram_accounts.id'), nullable=False)
+    recipient_username = db.Column(db.String(255), nullable=False)
+    recipient_user_id = db.Column(db.String(255))
+    thread_id = db.Column(db.String(128))
+
+    step_index = db.Column(db.Integer, nullable=False)
+    message_text = db.Column(db.Text)
+    status = db.Column(db.String(32), default='sent')  # sent|failed|skipped
+    error_message = db.Column(db.Text)
+    sent_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)

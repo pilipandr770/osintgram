@@ -7,7 +7,7 @@ from flask_login import LoginManager, login_required, current_user
 from flask_migrate import Migrate
 from config import config
 from database import db, init_db
-from models import User, InstagramAccount, Follower, ParseSession, PublishedContent, ExportHistory, MessageLog, SentMessage, RssTrend, ContentIdea, AutomationSettings, AiCache
+from models import User, InstagramAccount, Follower, ParseSession, PublishedContent, ExportHistory, MessageLog, SentMessage, RssTrend, ContentIdea, AutomationSettings, AiCache, DmAssistantSettings, InviteCampaignSettings
 from instagram_service import InstagramService
 from encryption import encrypt_password, decrypt_password
 from geo_search import analyze_profile_relevance, HASHTAGS_SEARCH
@@ -214,6 +214,32 @@ def create_app(config_name=None):
             except Exception:
                 pass
 
+            # Remove dependent rows to avoid FK constraint errors
+            from models import (
+                DmAssistantSettings, DmThreadState, DmMessage,
+                InviteCampaignSettings, InviteCampaignRecipient, InviteCampaignSend,
+                PublishedContent, MessageLog,
+            )
+
+            # DM assistant
+            DmMessage.query.filter_by(instagram_account_id=account.id).delete(synchronize_session=False)
+            DmThreadState.query.filter_by(instagram_account_id=account.id).delete(synchronize_session=False)
+            DmAssistantSettings.query.filter_by(instagram_account_id=account.id).delete(synchronize_session=False)
+
+            # Invite campaign
+            InviteCampaignSend.query.filter_by(instagram_account_id=account.id).delete(synchronize_session=False)
+            InviteCampaignRecipient.query.filter_by(instagram_account_id=account.id).delete(synchronize_session=False)
+            InviteCampaignSettings.query.filter_by(instagram_account_id=account.id).delete(synchronize_session=False)
+
+            # Published content history
+            PublishedContent.query.filter_by(instagram_account_id=account.id).delete(synchronize_session=False)
+
+            # Manual Direct blast logs: delete SentMessage rows linked to MessageLog, then MessageLog
+            log_ids = [r[0] for r in db.session.query(MessageLog.id).filter_by(account_id=account.id).all()]
+            if log_ids:
+                SentMessage.query.filter(SentMessage.message_log_id.in_(log_ids)).delete(synchronize_session=False)
+                MessageLog.query.filter(MessageLog.id.in_(log_ids)).delete(synchronize_session=False)
+
             db.session.delete(account)
             db.session.commit()
             flash(f'Аккаунт @{account.instagram_username} удален', 'success')
@@ -221,6 +247,51 @@ def create_app(config_name=None):
             db.session.rollback()
             flash(f'Ошибка удаления: {str(e)}', 'error')
         
+        return redirect(url_for('manage_accounts'))
+
+    @app.route('/accounts/<account_id>/password', methods=['POST'])
+    @login_required
+    def update_account_password(account_id):
+        """Re-save Instagram password (encrypt again) and verify login."""
+        account = InstagramAccount.query.filter_by(
+            id=account_id,
+            user_id=current_user.id
+        ).first()
+
+        if not account:
+            flash('Аккаунт не найден', 'error')
+            return redirect(url_for('manage_accounts'))
+
+        new_password = request.form.get('new_instagram_password', '')
+        if not new_password:
+            flash('Введите новый пароль', 'error')
+            return redirect(url_for('manage_accounts'))
+
+        # Verify credentials before saving
+        flash('Проверяем новый пароль...', 'info')
+        service = InstagramService(account.instagram_username, new_password)
+        success, message = service.login()
+        if not success:
+            flash(f'Ошибка входа: {message}', 'error')
+            return redirect(url_for('manage_accounts'))
+
+        try:
+            account.instagram_password = encrypt_password(new_password)
+
+            # Remove local instagrapi session file to avoid stale sessions
+            try:
+                session_path = os.path.join(os.path.dirname(__file__), 'sessions', f"{account.instagram_username}_session.json")
+                if os.path.exists(session_path):
+                    os.remove(session_path)
+            except Exception:
+                pass
+
+            db.session.commit()
+            flash(f'Пароль для @{account.instagram_username} обновлен', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Ошибка сохранения пароля: {str(e)}', 'error')
+
         return redirect(url_for('manage_accounts'))
     
     @app.route('/parse', methods=['GET', 'POST'])
@@ -858,6 +929,35 @@ def create_app(config_name=None):
         
         # Акаунти
         accounts = InstagramAccount.query.filter_by(user_id=user_id).all()
+
+        dm_rows = DmAssistantSettings.query.filter_by(user_id=user_id).all()
+
+        # DM assistant settings (per IG account)
+        dm_settings_by_account = {s.instagram_account_id: s for s in dm_rows}
+        dm_settings_json = {
+            str(s.instagram_account_id): {
+                'enabled': bool(s.enabled),
+                'reply_to_existing_threads': bool(getattr(s, 'reply_to_existing_threads', False)),
+                'language': (s.language or 'ru'),
+                'max_replies_per_day': int(s.max_replies_per_day or 20),
+                'system_instructions': (s.system_instructions or ''),
+            }
+            for s in dm_rows
+        }
+
+        invite_rows = InviteCampaignSettings.query.filter_by(user_id=user_id).all()
+        invite_settings_json = {
+            str(s.instagram_account_id): {
+                'enabled': bool(s.enabled),
+                'audience_type': (s.audience_type or 'target'),
+                'max_sends_per_day': int(s.max_sends_per_day or 20),
+                'min_delay_seconds': int(s.min_delay_seconds or 45),
+                'max_delay_seconds': int(s.max_delay_seconds or 75),
+                'stop_on_inbound_reply': bool(s.stop_on_inbound_reply),
+                'steps': (s.steps or []),
+            }
+            for s in invite_rows
+        }
         
         # Історія розсилок
         message_logs = MessageLog.query.filter_by(user_id=user_id).order_by(
@@ -871,8 +971,123 @@ def create_app(config_name=None):
             messages_sent_today=messages_sent_today,
             daily_limit=daily_limit,
             accounts=accounts,
-            message_logs=message_logs
+            message_logs=message_logs,
+            dm_settings_by_account=dm_settings_by_account,
+            dm_settings_json=dm_settings_json,
+            invite_settings_json=invite_settings_json,
         )
+
+    @app.route('/dm-assistant/settings', methods=['POST'])
+    @login_required
+    def dm_assistant_save_settings():
+        """Save OpenAI-powered DM auto-reply instructions/settings."""
+        user_id = current_user.id
+        account_id = (request.form.get('account_id') or '').strip()
+        if not account_id:
+            flash('Оберіть акаунт для авто-відповідача', 'error')
+            return redirect(url_for('messaging'))
+
+        account = InstagramAccount.query.filter_by(id=account_id, user_id=user_id).first()
+        if not account:
+            flash('Акаунт не знайдено', 'error')
+            return redirect(url_for('messaging'))
+
+        enabled = bool(request.form.get('enabled'))
+        reply_to_existing = bool(request.form.get('reply_to_existing_threads'))
+        instructions = (request.form.get('system_instructions') or '').strip()
+        language = (request.form.get('language') or 'ru').strip()[:16]
+
+        try:
+            max_replies_per_day = int(request.form.get('max_replies_per_day', 20))
+        except Exception:
+            max_replies_per_day = 20
+
+        settings = DmAssistantSettings.query.filter_by(user_id=user_id, instagram_account_id=account_id).first()
+        if settings is None:
+            settings = DmAssistantSettings(user_id=user_id, instagram_account_id=account_id)
+            db.session.add(settings)
+
+        settings.enabled = enabled
+        settings.reply_to_existing_threads = reply_to_existing
+        settings.system_instructions = instructions
+        settings.language = language or 'ru'
+        settings.max_replies_per_day = max(1, min(max_replies_per_day, 200))
+
+        try:
+            db.session.commit()
+            flash('Налаштування авто-відповідача збережено', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Не вдалося зберегти налаштування: {e}', 'error')
+
+        return redirect(url_for('messaging'))
+
+
+    @app.route('/invite-campaign/settings', methods=['POST'])
+    @login_required
+    def invite_campaign_save_settings():
+        """Save automated invite campaign program settings."""
+        user_id = current_user.id
+        account_id = (request.form.get('account_id') or '').strip()
+        if not account_id:
+            flash('Оберіть акаунт для програми запрошень', 'error')
+            return redirect(url_for('messaging'))
+
+        account = InstagramAccount.query.filter_by(id=account_id, user_id=user_id).first()
+        if not account:
+            flash('Акаунт не знайдено', 'error')
+            return redirect(url_for('messaging'))
+
+        enabled = bool(request.form.get('enabled'))
+        audience_type = (request.form.get('audience_type') or 'target').strip()[:50]
+        stop_on_inbound_reply = bool(request.form.get('stop_on_inbound_reply'))
+
+        def _get_int(name, default):
+            try:
+                value = int(request.form.get(name, default))
+            except Exception:
+                value = default
+            return value
+
+        max_sends_per_day = _get_int('max_sends_per_day', 20)
+        min_delay_seconds = _get_int('min_delay_seconds', 45)
+        max_delay_seconds = _get_int('max_delay_seconds', 75)
+
+        step1 = (request.form.get('step1') or '').strip()
+        step2 = (request.form.get('step2') or '').strip()
+        step3 = (request.form.get('step3') or '').strip()
+        step2_offset_hours = _get_int('step2_offset_hours', 48)
+        step3_offset_hours = _get_int('step3_offset_hours', 120)
+
+        steps = []
+        if step1:
+            steps.append({'offset_hours': 0, 'template': step1})
+        if step2:
+            steps.append({'offset_hours': max(1, int(step2_offset_hours)), 'template': step2})
+        if step3:
+            steps.append({'offset_hours': max(1, int(step3_offset_hours)), 'template': step3})
+
+        settings = InviteCampaignSettings.query.filter_by(user_id=user_id, instagram_account_id=account_id).first()
+        if settings is None:
+            settings = InviteCampaignSettings(user_id=user_id, instagram_account_id=account_id)
+            db.session.add(settings)
+
+        settings.enabled = enabled
+        settings.audience_type = audience_type or 'target'
+        settings.max_sends_per_day = max(1, min(max_sends_per_day, 500))
+        settings.min_delay_seconds = max(1, min(min_delay_seconds, 3600))
+        settings.max_delay_seconds = max(1, min(max_delay_seconds, 3600))
+        settings.stop_on_inbound_reply = stop_on_inbound_reply
+        settings.steps = steps
+
+        try:
+            db.session.commit()
+            flash('Налаштування програми запрошень збережено', 'success')
+        except Exception as e:
+            db.session.rollback()
+            flash(f'Не вдалося зберегти налаштування: {e}', 'error')
+
+        return redirect(url_for('messaging'))
     
     @app.route('/send-messages', methods=['POST'])
     @login_required

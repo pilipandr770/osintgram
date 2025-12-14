@@ -57,6 +57,9 @@ class InstagramService:
         Returns:
             Tuple[bool, str]: (успех, сообщение)
         """
+        if not self.password:
+            return False, 'Порожній пароль (помилка розшифрування або не задано)'
+
         # Пробуем загрузить существующую сессию
         if os.path.exists(self.session_file):
             try:
@@ -192,7 +195,27 @@ class InstagramService:
         try:
             # Убираем @ если есть
             username = username.lstrip('@').strip()
-            user_info = self.client.user_info_by_username(username)
+            # instagrapi versions differ; prefer v1 method to avoid public_request web fallbacks
+            user_info = None
+            try:
+                if hasattr(self.client, 'user_info_by_username_v1'):
+                    user_info = self.client.user_info_by_username_v1(username)
+            except Exception:
+                user_info = None
+            if user_info is None:
+                try:
+                    user_info = self.client.user_info_by_username(username)
+                except Exception:
+                    user_info = None
+            if user_info is None:
+                try:
+                    if hasattr(self.client, 'user_info_by_username_gql'):
+                        user_info = self.client.user_info_by_username_gql(username)
+                except Exception:
+                    user_info = None
+
+            if user_info is None:
+                return None
             
             return {
                 'user_id': str(user_info.pk),
@@ -594,7 +617,9 @@ class InstagramService:
             print(f"🔍 Пошук акаунтів по ключовому слову: {keyword}...")
             
             # Пошук користувачів
-            users = self.client.search_users(keyword, amount=max_results)
+            users = self.client.search_users(keyword)
+            if max_results:
+                users = users[: int(max_results)]
             
             accounts = []
             for user in users:
