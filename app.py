@@ -7,7 +7,7 @@ from flask_login import LoginManager, login_required, current_user
 from flask_migrate import Migrate
 from config import config
 from database import db, init_db
-from models import User, InstagramAccount, Follower, ParseSession, PublishedContent, ExportHistory, MessageLog, SentMessage, RssTrend, ContentIdea, AutomationSettings, AiCache, DmAssistantSettings, InviteCampaignSettings
+from models import User, InstagramAccount, Follower, ParseSession, PublishedContent, ExportHistory, MessageLog, SentMessage, RssTrend, ContentIdea, AutomationSettings, AiCache, DiscoverCache, DmAssistantSettings, InviteCampaignSettings
 from instagram_service import InstagramService
 from encryption import encrypt_password, decrypt_password
 from geo_search import analyze_profile_relevance, HASHTAGS_SEARCH
@@ -411,10 +411,25 @@ def create_app(config_name=None):
                 # 🔍 Пошук схожих акаунтів
                 flash('🔍 Шукаємо схожі акаунти... Це може зайняти 1-2 хвилини', 'info')
                 discovered = service.discover_similar_accounts()
-                
-                # Зберігаємо в сесії для відображення
-                from flask import session as flask_session
-                flask_session['discovered_accounts'] = discovered[:30]  # Топ-30
+
+                # Зберігаємо server-side в БД (а не в cookie-session)
+                top = discovered[:30]
+                try:
+                    cache_row = (DiscoverCache.query
+                                 .filter_by(user_id=current_user.id, instagram_account_id=instagram_account_id)
+                                 .first())
+                    if cache_row is None:
+                        cache_row = DiscoverCache(
+                            user_id=current_user.id,
+                            instagram_account_id=instagram_account_id,
+                            payload=top
+                        )
+                        db.session.add(cache_row)
+                    else:
+                        cache_row.payload = top
+                    db.session.commit()
+                except Exception:
+                    db.session.rollback()
                 
                 flash(f'✅ Знайдено {len(discovered)} потенційних акаунтів!', 'success')
                 return redirect(url_for('discover_accounts'))
@@ -424,14 +439,23 @@ def create_app(config_name=None):
                 return redirect(url_for('discover_accounts'))
         
         # GET - показати форму та результати
+        # Якщо раніше щось клали в cookie-session — прибираємо, щоб не було oversized cookie warning
         from flask import session as flask_session
-        discovered = flask_session.get('discovered_accounts', [])
+        flask_session.pop('discovered_accounts', None)
+
+        last_cache = (DiscoverCache.query
+                  .filter_by(user_id=current_user.id)
+                  .order_by(DiscoverCache.updated_at.desc())
+                  .first())
+        discovered = (last_cache.payload or []) if last_cache else []
+        selected_instagram_account_id = last_cache.instagram_account_id if last_cache else ''
         accounts = InstagramAccount.query.filter_by(user_id=current_user.id).all()
         
         return render_template('discover.html', 
                                accounts=accounts, 
                                discovered=discovered,
-                               hashtags=HASHTAGS_SEARCH[:10])
+                       hashtags=HASHTAGS_SEARCH[:10],
+                       selected_instagram_account_id=selected_instagram_account_id)
     
     @app.route('/import', methods=['POST'])
     @login_required
@@ -941,6 +965,8 @@ def create_app(config_name=None):
                 'language': (s.language or 'ru'),
                 'max_replies_per_day': int(s.max_replies_per_day or 20),
                 'system_instructions': (s.system_instructions or ''),
+                'last_run_at': (s.last_run_at.isoformat() if getattr(s, 'last_run_at', None) else None),
+                'last_error': (s.last_error or None),
             }
             for s in dm_rows
         }
@@ -954,6 +980,9 @@ def create_app(config_name=None):
                 'min_delay_seconds': int(s.min_delay_seconds or 45),
                 'max_delay_seconds': int(s.max_delay_seconds or 75),
                 'stop_on_inbound_reply': bool(s.stop_on_inbound_reply),
+                'allowed_start_hour': int(getattr(s, 'allowed_start_hour', 8) or 8),
+                'allowed_end_hour': int(getattr(s, 'allowed_end_hour', 22) or 22),
+                'timezone': (getattr(s, 'timezone', None) or 'Europe/Berlin'),
                 'steps': (s.steps or []),
             }
             for s in invite_rows
@@ -975,6 +1004,10 @@ def create_app(config_name=None):
             dm_settings_by_account=dm_settings_by_account,
             dm_settings_json=dm_settings_json,
             invite_settings_json=invite_settings_json,
+            workers_env={
+                'ENABLE_ALL_WORKERS': os.environ.get('ENABLE_ALL_WORKERS', ''),
+                'ENABLE_DM_ASSISTANT': os.environ.get('ENABLE_DM_ASSISTANT', ''),
+            },
         )
 
     @app.route('/dm-assistant/settings', methods=['POST'])
@@ -1041,13 +1074,16 @@ def create_app(config_name=None):
         enabled = bool(request.form.get('enabled'))
         audience_type = (request.form.get('audience_type') or 'target').strip()[:50]
         stop_on_inbound_reply = bool(request.form.get('stop_on_inbound_reply'))
-
         def _get_int(name, default):
             try:
                 value = int(request.form.get(name, default))
             except Exception:
                 value = default
             return value
+
+        allowed_start_hour = _get_int('allowed_start_hour', 8)
+        allowed_end_hour = _get_int('allowed_end_hour', 22)
+        tz = (request.form.get('timezone') or 'Europe/Berlin').strip()[:64]
 
         max_sends_per_day = _get_int('max_sends_per_day', 20)
         min_delay_seconds = _get_int('min_delay_seconds', 45)
@@ -1078,6 +1114,9 @@ def create_app(config_name=None):
         settings.min_delay_seconds = max(1, min(min_delay_seconds, 3600))
         settings.max_delay_seconds = max(1, min(max_delay_seconds, 3600))
         settings.stop_on_inbound_reply = stop_on_inbound_reply
+        settings.allowed_start_hour = max(0, min(int(allowed_start_hour), 23))
+        settings.allowed_end_hour = max(0, min(int(allowed_end_hour), 23))
+        settings.timezone = tz or 'Europe/Berlin'
         settings.steps = steps
 
         try:

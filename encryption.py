@@ -84,13 +84,11 @@ def decrypt_password(encrypted_password: str) -> str:
         decrypted = fernet.decrypt(encrypted_password.encode())
         return decrypted.decode()
     except Exception as e:
-        # InvalidToken often renders as empty string, so include type.
-        err_name = type(e).__name__
-        err_msg = str(e) or '(no message)'
-        print(f"Помилка розшифрування ({err_name}): {err_msg}")
-
-        # Backward-compat: if DB contains plaintext, return as-is.
-        # If it looks like a Fernet token but can't be decrypted, do NOT return it (it would be used as a password).
+        # Backward-compat: DB may contain plaintext. In that case we silently return it.
+        # If it looks like a Fernet token but can't be decrypted (wrong key / corrupted), do NOT return it.
         if _looks_like_fernet_token(encrypted_password):
+            err_name = type(e).__name__
+            err_msg = str(e) or '(no message)'
+            print(f"Помилка розшифрування ({err_name}): {err_msg}")
             return ""
         return encrypted_password

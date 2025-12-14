@@ -83,7 +83,7 @@
         <p class="text-muted">Сортовано за релевантністю. Відмітьте акаунти для парсингу підписників.</p>
         
         <form method="POST" action="{{ url_for('parse_competitors') }}">
-            <input type="hidden" name="instagram_account_id" value="{{ accounts[0].id if accounts else '' }}">
+            <input type="hidden" name="instagram_account_id" value="{{ selected_instagram_account_id or (accounts[0].id if accounts else '') }}">
             
             <div class="table-responsive">
                 <table class="table">
@@ -161,6 +161,17 @@
     </div>
     {% endif %}
 </div>
+
+<script>
+// Preselect the account used for the last discover run (if available)
+(function () {
+    const selectedId = {{ (selected_instagram_account_id or '')|tojson }};
+    if (!selectedId) return;
+    const sel = document.getElementById('instagram_account_id');
+    if (!sel) return;
+    sel.value = selectedId;
+})();
+</script>
 
 <script>
 function toggleAll(source) {

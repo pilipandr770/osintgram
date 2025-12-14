@@ -479,6 +479,25 @@ class AiCache(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
 
 
+class DiscoverCache(db.Model):
+    """Кеш результатів /discover (щоб не зберігати великі дані в cookie-session)."""
+    __tablename__ = 'discover_cache'
+    __table_args__ = (
+        db.Index('idx_discover_cache_user', 'user_id'),
+        db.Index('idx_discover_cache_user_account', 'user_id', 'instagram_account_id'),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), nullable=False, index=True)
+    instagram_account_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.instagram_accounts.id'), nullable=False)
+
+    payload = db.Column(db.JSON)  # list[dict]
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 # ============ DM ASSISTANT (AUTO-REPLY) ============
 
 class DmAssistantSettings(db.Model):
@@ -591,6 +610,11 @@ class InviteCampaignSettings(db.Model):
     steps = db.Column(db.JSON)
 
     stop_on_inbound_reply = db.Column(db.Boolean, default=True)
+
+    # Day/Night режим: дозволений інтервал відправок у локальному часі (timezone)
+    allowed_start_hour = db.Column(db.Integer, default=8)   # 0..23
+    allowed_end_hour = db.Column(db.Integer, default=22)    # 0..23
+    timezone = db.Column(db.String(64), default='Europe/Berlin')
 
     last_run_at = db.Column(db.DateTime)
     last_error = db.Column(db.Text)

@@ -16,6 +16,9 @@ import time
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
+from zoneinfo import ZoneInfo
+from datetime import timezone
+
 from database import db
 from models import (
     Follower,
@@ -31,6 +34,33 @@ from instagram_service import InstagramService
 
 def _now_utc() -> datetime:
     return datetime.utcnow()
+
+
+def _is_within_allowed_hours(settings: InviteCampaignSettings, now_utc: Optional[datetime] = None) -> bool:
+    """Return True if current local time (settings.timezone) is inside allowed [start,end) hours."""
+    now_utc = now_utc or _now_utc()
+    tz_name = (getattr(settings, 'timezone', None) or 'Europe/Berlin')
+    try:
+        tz = ZoneInfo(tz_name)
+    except Exception:
+        tz = ZoneInfo('Europe/Berlin')
+
+    start = int(getattr(settings, 'allowed_start_hour', 8) or 8)
+    end = int(getattr(settings, 'allowed_end_hour', 22) or 22)
+    start = max(0, min(start, 23))
+    end = max(0, min(end, 23))
+
+    # start == end means 24h allowed
+    if start == end:
+        return True
+
+    local = now_utc.replace(tzinfo=timezone.utc).astimezone(tz)
+    h = int(local.hour)
+
+    if start < end:
+        return start <= h < end
+    # wrap across midnight
+    return (h >= start) or (h < end)
 
 
 def _as_datetime(ts: Any) -> Optional[datetime]:
@@ -241,6 +271,10 @@ def _run_for_account(
 
     steps = settings.steps or []
     if not isinstance(steps, list) or not steps:
+        return 0, 0, 0, 0
+
+    # Day/Night режим: не відправляємо в "нічні" години
+    if not _is_within_allowed_hours(settings):
         return 0, 0, 0, 0
 
     password = decrypt_password(account.instagram_password)

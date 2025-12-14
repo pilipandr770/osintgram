@@ -114,9 +114,12 @@ def poll_and_reply_for_user(user_id: str, threads_limit: int = 10, messages_per_
             )
             total_replied += replied
             db.session.commit()
+            if settings.last_error:
+                print(f"DM assistant: user={user_id} account={settings.instagram_account_id} error={settings.last_error}")
         except Exception as e:
             settings.last_error = str(e)
             db.session.commit()
+            print(f"DM assistant: user={user_id} account={settings.instagram_account_id} exception={settings.last_error}")
 
     return total_replied
 
@@ -138,8 +141,9 @@ def _poll_and_reply_for_account(
         return 0
 
     service = InstagramService(account.instagram_username, password)
-    ok, _ = service.login()
+    ok, login_msg = service.login()
     if not ok:
+        settings.last_error = f'login_failed: {login_msg}'
         return 0
 
     client = service.client
@@ -152,7 +156,11 @@ def _poll_and_reply_for_account(
 
     replied_count = 0
 
-    threads = client.direct_threads(amount=int(threads_limit or 10))
+    try:
+        threads = client.direct_threads(amount=int(threads_limit or 10))
+    except Exception as e:
+        settings.last_error = f'direct_threads_failed: {e}'
+        return 0
     for th in threads:
         if daily_sent + replied_count >= daily_cap:
             break
@@ -163,7 +171,12 @@ def _poll_and_reply_for_account(
 
         state = DmThreadState.query.filter_by(instagram_account_id=account_id, thread_id=thread_id).first()
 
-        msgs = client.direct_messages(thread_id, amount=int(messages_per_thread or 20))
+        try:
+            msgs = client.direct_messages(thread_id, amount=int(messages_per_thread or 20))
+        except Exception as e:
+            # Do not abort whole run on one thread
+            settings.last_error = f'direct_messages_failed(thread={thread_id}): {e}'
+            continue
         if not msgs:
             continue
 
@@ -263,7 +276,15 @@ def _poll_and_reply_for_account(
             continue
 
         # Send
-        result = client.direct_send(reply_text, thread_ids=[thread_id])
+        try:
+            result = client.direct_send(reply_text, thread_ids=[thread_id])
+        except Exception as e:
+            settings.last_error = f'direct_send_failed(thread={thread_id}): {e}'
+            # Update cursor so we don't retry the same inbound endlessly
+            state.last_seen_item_id = newest_id
+            state.last_seen_at = _as_datetime(_get_attr(newest, ['timestamp', 'created_at', 'time'], default=None))
+            db.session.commit()
+            continue
 
         # Save outbound message as well
         out_item_id = str(_get_attr(result, ['id', 'item_id', 'pk', 'uuid'], default=''))

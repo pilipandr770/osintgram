@@ -6,6 +6,17 @@
 <div class="container">
     <h1>📨 Розсилка в Direct</h1>
 
+    {% if workers_env %}
+    <div class="alert alert-info" style="background: #e3f2fd; border: 1px solid #90caf9; padding: 12px 15px; border-radius: 8px; margin-bottom: 16px;">
+        <strong>Worker env:</strong>
+        ENABLE_ALL_WORKERS={{ workers_env.ENABLE_ALL_WORKERS or 'false' }},
+        ENABLE_DM_ASSISTANT={{ workers_env.ENABLE_DM_ASSISTANT or 'false' }}.
+        <div style="color:#555; font-size: 0.9em; margin-top: 6px;">
+            Якщо обидва <code>false</code> — авто-відповідач не запуститься (потрібен воркер).
+        </div>
+    </div>
+    {% endif %}
+
     <!-- DM Assistant settings -->
     <div class="card" style="background: white; padding: 25px; border-radius: 12px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); margin-bottom: 20px;">
         <h2>🤖 Авто-відповідач в Direct (OpenAI)</h2>
@@ -66,6 +77,11 @@
                 💾 Зберегти
             </button>
 
+            <div id="dmAssistantStatus" style="background:#f8f9fa; border:1px solid #e9ecef; padding: 10px 12px; border-radius: 8px; color:#555; font-size: 0.95em;">
+                <strong>Статус:</strong>
+                <span id="dmStatusText">Оберіть акаунт, щоб побачити останній запуск/помилки.</span>
+            </div>
+
             <div style="color:#666; font-size: 0.9em;">
                 Воркер: <code>py -3.10 dm_assistant_runner.py</code> (потрібно <code>ENABLE_DM_ASSISTANT=true</code> в .env)
                 <br>
@@ -118,6 +134,18 @@
                     <input type="number" name="max_delay_seconds" min="10" max="600" value="75"
                            style="padding: 8px; border: 1px solid #ddd; border-radius: 6px; width: 110px;">
                 </div>
+                  <div>
+                      <label><strong>Час відправки:</strong></label><br>
+                      <input type="number" name="allowed_start_hour" min="0" max="23" value="8"
+                          style="padding: 8px; border: 1px solid #ddd; border-radius: 6px; width: 80px;"> -
+                      <input type="number" name="allowed_end_hour" min="0" max="23" value="22"
+                          style="padding: 8px; border: 1px solid #ddd; border-radius: 6px; width: 80px;">
+                  </div>
+                  <div>
+                      <label><strong>Timezone:</strong></label><br>
+                      <input type="text" name="timezone" value="Europe/Berlin"
+                          style="padding: 8px; border: 1px solid #ddd; border-radius: 6px; width: 220px;">
+                  </div>
             </div>
 
             <label style="display:flex; gap:10px; align-items:center;">
@@ -348,6 +376,23 @@
 window.dmSettings = {{ (dm_settings_json or {}) | tojson }};
 window.inviteCampaignSettings = {{ (invite_settings_json or {}) | tojson }};
 
+function renderDmStatus(accountId) {
+    const box = document.getElementById('dmStatusText');
+    if (!box) return;
+    if (!accountId) {
+        box.textContent = 'Оберіть акаунт, щоб побачити останній запуск/помилки.';
+        return;
+    }
+    const s = (window.dmSettings || {})[accountId];
+    if (!s) {
+        box.textContent = 'Немає збережених даних для цього акаунта. Збережіть налаштування.';
+        return;
+    }
+    const lastRun = s.last_run_at ? s.last_run_at : '—';
+    const lastErr = s.last_error ? s.last_error : '—';
+    box.textContent = `last_run_at: ${lastRun}; last_error: ${lastErr}`;
+}
+
 const templates = {
     intro: `Привіт, {name}! 👋
 
@@ -413,9 +458,12 @@ function _setSelectValue(selectEl, value) {
         if (language) _setSelectValue(language, s.language || 'ru');
         if (maxPerDay && s.max_replies_per_day != null) maxPerDay.value = s.max_replies_per_day;
         if (instructions && s.system_instructions != null) instructions.value = s.system_instructions;
+        renderDmStatus(select.value);
     }
 
     select.addEventListener('change', apply);
+    // Show status for current selection on load
+    renderDmStatus(select.value);
 })();
 
 (function initInviteCampaignPrefill() {
@@ -430,6 +478,9 @@ function _setSelectValue(selectEl, value) {
     const minDelay = form.querySelector('input[name="min_delay_seconds"]');
     const maxDelay = form.querySelector('input[name="max_delay_seconds"]');
     const stopOnReply = form.querySelector('input[name="stop_on_inbound_reply"]');
+    const startHour = form.querySelector('input[name="allowed_start_hour"]');
+    const endHour = form.querySelector('input[name="allowed_end_hour"]');
+    const tz = form.querySelector('input[name="timezone"]');
 
     const step1 = form.querySelector('textarea[name="step1"]');
     const step2 = form.querySelector('textarea[name="step2"]');
@@ -447,6 +498,9 @@ function _setSelectValue(selectEl, value) {
         if (minDelay && s.min_delay_seconds != null) minDelay.value = s.min_delay_seconds;
         if (maxDelay && s.max_delay_seconds != null) maxDelay.value = s.max_delay_seconds;
         if (stopOnReply) stopOnReply.checked = (s.stop_on_inbound_reply !== false);
+        if (startHour && s.allowed_start_hour != null) startHour.value = s.allowed_start_hour;
+        if (endHour && s.allowed_end_hour != null) endHour.value = s.allowed_end_hour;
+        if (tz && s.timezone != null) tz.value = s.timezone;
 
         const steps = Array.isArray(s.steps) ? s.steps : [];
         if (step1) step1.value = (steps[0] && steps[0].template) ? steps[0].template : '';
@@ -456,9 +510,9 @@ function _setSelectValue(selectEl, value) {
         if (step3Offset) step3Offset.value = (steps[2] && steps[2].offset_hours != null) ? steps[2].offset_hours : (step3Offset.value || 120);
     }
 
-    select.addEventListener('change', apply);
+    select.addEventListener('change', (e) => applyDmPrefill(e.target.value));
 })();
-</script>
+
 
 <style>
 .template-btn:hover {
