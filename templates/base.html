@@ -11,7 +11,7 @@
     <nav class="navbar">
         <div class="container">
             <div class="navbar-brand">
-                <a href="{{ url_for('dashboard') if current_user.is_authenticated else url_for('auth.login') }}" class="logo">
+                <a href="{{ url_for('dashboard') if current_user.is_authenticated else url_for('index') }}" class="logo">
                     📸 InstagramOSINT
                 </a>
             </div>
@@ -48,11 +48,20 @@
                     <a href="{{ url_for('statistics') }}" class="nav-link {% if request.endpoint == 'statistics' %}active{% endif %}">
                         📈 Статистика
                     </a>
+                    <a href="{{ url_for('billing.billing_home') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('billing.') %}active{% endif %}">
+                        💳 Підписка
+                    </a>
+                    {% if is_admin %}
+                    <a href="{{ url_for('admin.admin_home') }}" class="nav-link {% if request.endpoint and request.endpoint.startswith('admin.') %}active{% endif %}">
+                        🛠️ Admin
+                    </a>
+                    {% endif %}
                     <div class="nav-user">
                         <span class="username">{{ current_user.username }}</span>
                         <a href="{{ url_for('auth.logout') }}" class="nav-link logout">Вихід</a>
                     </div>
                 {% else %}
+                    <a href="{{ url_for('index') }}" class="nav-link">Головна</a>
                     <a href="{{ url_for('auth.login') }}" class="nav-link">Вхід</a>
                     <a href="{{ url_for('auth.register') }}" class="nav-link btn-primary">Реєстрація</a>
                 {% endif %}

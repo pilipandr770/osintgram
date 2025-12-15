@@ -19,3 +19,4 @@ openai==1.6.1
 feedparser==6.0.10
 moviepy==1.0.3
 imageio-ffmpeg==0.4.9
+stripe>=7.0.0,<12

@@ -464,6 +464,24 @@ class AutomationSettings(db.Model):
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+class RssFeedSettings(db.Model):
+    """Per-user RSS feeds configuration (editable from the cabinet/UI)."""
+    __tablename__ = 'rss_feed_settings'
+    __table_args__ = (
+        db.Index('idx_rss_feed_settings_user', 'user_id', unique=True),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), nullable=False)
+
+    # Accepts either a list of URLs or a dict in the same shape as RSS_FEEDS.
+    feeds = db.Column(db.JSON)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
 class AiCache(db.Model):
     """Зберігає останні результати AI (щоб не класти великі об'єкти в cookie-session)."""
     __tablename__ = 'ai_cache'
@@ -706,3 +724,49 @@ class InviteCampaignSend(db.Model):
     status = db.Column(db.String(32), default='sent')  # sent|failed|skipped
     error_message = db.Column(db.Text)
     sent_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+
+# ============ SAAS BILLING (STRIPE) ============
+
+
+class BillingAccount(db.Model):
+    """Stores Stripe billing identifiers and subscription status per app user."""
+    __tablename__ = 'billing_accounts'
+    __table_args__ = (
+        db.Index('idx_billing_accounts_user', 'user_id', unique=True),
+        db.Index('idx_billing_accounts_status', 'subscription_status'),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'), nullable=False)
+
+    stripe_customer_id = db.Column(db.String(255), index=True)
+    stripe_subscription_id = db.Column(db.String(255), index=True)
+
+    subscription_status = db.Column(db.String(64), default='none')  # none|active|trialing|past_due|canceled|incomplete...
+    current_period_end = db.Column(db.DateTime)
+    cancel_at_period_end = db.Column(db.Boolean, default=False)
+    price_id = db.Column(db.String(255))
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+
+class BillingEvent(db.Model):
+    """Stores Stripe webhook event ids for idempotency/audit."""
+    __tablename__ = 'billing_events'
+    __table_args__ = (
+        db.Index('idx_billing_events_user', 'user_id'),
+        db.Index('idx_billing_events_event', 'stripe_event_id', unique=True),
+        {'schema': SCHEMA_NAME}
+    )
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = db.Column(db.String(36), db.ForeignKey(f'{SCHEMA_NAME}.users.id'))
+
+    stripe_event_id = db.Column(db.String(255), nullable=False)
+    event_type = db.Column(db.String(128))
+
+    processed_at = db.Column(db.DateTime, default=datetime.utcnow)
+    payload = db.Column(db.JSON)

@@ -1,0 +1,38 @@
+{% extends 'base.html' %}
+
+{% block title %}Підписка{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1>💳 Підписка</h1>
+
+  {% if billing_account %}
+    <p><strong>Статус:</strong> {{ billing_account.subscription_status or 'none' }}</p>
+    {% if billing_account.current_period_end %}
+      <p><strong>Оплачено до:</strong> {{ billing_account.current_period_end.strftime('%Y-%m-%d %H:%M') }} UTC</p>
+    {% endif %}
+    {% if billing_account.cancel_at_period_end %}
+      <p class="alert alert-warning">Скасування в кінці оплаченного періоду увімкнено.</p>
+    {% endif %}
+  {% else %}
+    <p>Підписка ще не налаштована.</p>
+  {% endif %}
+
+  <div style="margin-top: 16px;">
+    <form method="POST" action="{{ url_for('billing.create_checkout_session') }}">
+      {% if next_path %}<input type="hidden" name="next" value="{{ next_path }}">{% endif %}
+      <button class="btn btn-primary" type="submit">Оформити / продовжити підписку</button>
+    </form>
+  </div>
+
+  <div style="margin-top: 12px;">
+    <form method="POST" action="{{ url_for('billing.create_portal_session') }}">
+      <button class="btn" type="submit">Керувати підпискою (Stripe)</button>
+    </form>
+  </div>
+
+  <div style="margin-top: 12px; font-size: 14px; opacity: .9;">
+    <p>Якщо Stripe не налаштовано, додайте змінні: STRIPE_SECRET_KEY, STRIPE_PRICE_ID, STRIPE_WEBHOOK_SECRET.</p>
+  </div>
+</div>
+{% endblock %}

@@ -258,6 +258,15 @@
                                    style="padding: 8px; border: 1px solid #ddd; border-radius: 6px; width: 120px;">
                         </div>
 
+                        <div style="flex: 1; min-width: 320px;">
+                            <label><strong>RSS ленти (ваші):</strong> <span style="color:#666; font-weight: normal;">(по одному URL в рядок або JSON)</span></label><br>
+                            <textarea name="rss_feeds" rows="4" placeholder="https://example.com/feed.xml"
+                                      style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 6px; resize: vertical;">{{ rss_feeds_text or '' }}</textarea>
+                            <div style="color:#666; margin-top: 4px; font-size: 0.9em;">
+                                Якщо порожньо — використовуються дефолтні ленти.
+                            </div>
+                        </div>
+
                         <div>
                             <label><strong>Час публікацій (HH:MM, через кому):</strong></label><br>
                             <input type="text" name="publish_times"

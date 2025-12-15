@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+
+{% block title %}InstagramOSINT — SaaS{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1>InstagramOSINT</h1>
+  <p>Онлайн-кабінет для аналізу аудиторії, автопошуку, розсилок та автопублікацій.</p>
+
+  <div class="card" style="margin-top: 16px;">
+    <h2>Як це працює</h2>
+    <ol>
+      <li>Реєструєтесь і заходите в свій кабінет</li>
+      <li>Додаєте Instagram акаунт(и)</li>
+      <li>Збираєте аудиторію, запускаєте автоматизації</li>
+    </ol>
+  </div>
+
+  <div class="card" style="margin-top: 16px;">
+    <h2>Підписка</h2>
+    <p>Доступ до функцій керується підпискою (Stripe).</p>
+    <p style="margin-top: 12px;">
+      <a class="btn btn-primary" href="{{ url_for('auth.register') }}">Створити акаунт</a>
+      <a class="btn" href="{{ url_for('auth.login') }}" style="margin-left: 8px;">Увійти</a>
+    </p>
+  </div>
+
+  <div style="margin-top: 12px; font-size: 14px; opacity: .9;">
+    <p>Адмінка доступна лише для email з ADMIN_EMAILS.</p>
+  </div>
+</div>
+{% endblock %}

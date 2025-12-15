@@ -112,7 +112,7 @@ def create_scheduled_content_from_new_rss(user_id: str, days: int = 2, max_topic
     if settings.last_rss_check_at and (now - settings.last_rss_check_at) < timedelta(minutes=interval):
         return 0
 
-    trends = get_trending_topics(days=days, max_topics=max_topics)
+    trends = get_trending_topics(user_id=user_id, days=days, max_topics=max_topics)
     if not trends:
         return 0
 

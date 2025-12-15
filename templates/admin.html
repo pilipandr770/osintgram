@@ -1,0 +1,41 @@
+{% extends 'base.html' %}
+
+{% block title %}Admin{% endblock %}
+
+{% block content %}
+<div class="card">
+  <h1>🛠️ Admin</h1>
+  <p>Користувачі та статуси підписок.</p>
+
+  <div class="table-container" style="margin-top: 12px;">
+    <table class="data-table">
+      <thead>
+        <tr>
+          <th>Email</th>
+          <th>Username</th>
+          <th>Created</th>
+          <th>Last login</th>
+          <th>Sub status</th>
+          <th>Period end</th>
+          <th>Stripe customer</th>
+          <th>Stripe sub</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for user, bill in rows %}
+          <tr>
+            <td>{{ user.email }}</td>
+            <td>{{ user.username }}</td>
+            <td>{{ user.created_at.strftime('%Y-%m-%d') if user.created_at else '' }}</td>
+            <td>{{ user.last_login.strftime('%Y-%m-%d %H:%M') if user.last_login else '' }}</td>
+            <td>{{ bill.subscription_status if bill else 'none' }}</td>
+            <td>{{ bill.current_period_end.strftime('%Y-%m-%d %H:%M') if bill and bill.current_period_end else '' }}</td>
+            <td>{{ bill.stripe_customer_id if bill else '' }}</td>
+            <td>{{ bill.stripe_subscription_id if bill else '' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

@@ -3,7 +3,7 @@
 Джерела для ідей контенту про плитку, ремонт, дизайн ванних кімнат.
 """
 import feedparser
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 from datetime import datetime, timedelta
 import re
 import os
@@ -50,53 +50,84 @@ RSS_FEEDS = {
 }
 
 
-def get_rss_feeds_config() -> Dict[str, Dict]:
-    """Отримати конфіг RSS-лент з env (RSS_FEEDS_JSON) або дефолт."""
-    raw = os.environ.get('RSS_FEEDS_JSON', '').strip()
-    if not raw:
-        return RSS_FEEDS
-
-    try:
-        parsed = json.loads(raw)
-
-        # Формат 1: {"key": {"url": "...", "name": "...", ...}, ...}
-        if isinstance(parsed, dict):
-            feeds: Dict[str, Dict] = {}
-            for key, value in parsed.items():
-                if isinstance(value, str):
-                    feeds[str(key)] = {
-                        'url': value,
-                        'name': str(key),
-                        'category': 'custom',
-                        'language': 'en'
-                    }
-                elif isinstance(value, dict) and value.get('url'):
-                    feeds[str(key)] = {
-                        'url': value.get('url'),
-                        'name': value.get('name', str(key)),
-                        'category': value.get('category', 'custom'),
-                        'language': value.get('language', 'en')
-                    }
-
-            return feeds or RSS_FEEDS
-
-        # Формат 2: ["https://example.com/feed.xml", ...]
-        if isinstance(parsed, list):
-            feeds: Dict[str, Dict] = {}
-            for i, url in enumerate(parsed, start=1):
-                if not isinstance(url, str) or not url.strip():
+def _normalize_feeds(parsed: Any) -> Dict[str, Dict]:
+    """Normalize feeds input into the internal dict format."""
+    # Формат 1: {"key": {"url": "...", "name": "...", ...}, ...}
+    if isinstance(parsed, dict):
+        feeds: Dict[str, Dict] = {}
+        for key, value in parsed.items():
+            if isinstance(value, str):
+                url = value.strip()
+                if not url:
                     continue
-                feeds[f'feed_{i}'] = {
-                    'url': url.strip(),
-                    'name': f'Feed {i}',
+                feeds[str(key)] = {
+                    'url': url,
+                    'name': str(key),
                     'category': 'custom',
                     'language': 'en'
                 }
-            return feeds or RSS_FEEDS
+            elif isinstance(value, dict) and value.get('url'):
+                url = str(value.get('url') or '').strip()
+                if not url:
+                    continue
+                feeds[str(key)] = {
+                    'url': url,
+                    'name': value.get('name', str(key)),
+                    'category': value.get('category', 'custom'),
+                    'language': value.get('language', 'en')
+                }
+        return feeds
 
-        return RSS_FEEDS
-    except Exception:
-        return RSS_FEEDS
+    # Формат 2: ["https://example.com/feed.xml", ...]
+    if isinstance(parsed, list):
+        feeds = {}
+        i = 0
+        for raw_url in parsed:
+            if not isinstance(raw_url, str):
+                continue
+            url = raw_url.strip()
+            if not url:
+                continue
+            i += 1
+            feeds[f'feed_{i}'] = {
+                'url': url,
+                'name': f'Feed {i}',
+                'category': 'custom',
+                'language': 'en'
+            }
+        return feeds
+
+    return {}
+
+
+def get_rss_feeds_config(user_id: Optional[str] = None) -> Dict[str, Dict]:
+    """Отримати конфіг RSS-лент: per-user (DB) → env (RSS_FEEDS_JSON) → дефолт."""
+    # 1) Per-user DB override
+    if user_id:
+        try:
+            from models import RssFeedSettings
+            row = RssFeedSettings.query.filter_by(user_id=user_id).first()
+            if row and row.feeds:
+                feeds = _normalize_feeds(row.feeds)
+                if feeds:
+                    return feeds
+        except Exception:
+            # If DB/app context isn't available, fall back to env/default.
+            pass
+
+    # 2) Global env override
+    raw = os.environ.get('RSS_FEEDS_JSON', '').strip()
+    if raw:
+        try:
+            parsed = json.loads(raw)
+            feeds = _normalize_feeds(parsed)
+            if feeds:
+                return feeds
+        except Exception:
+            pass
+
+    # 3) Hardcoded default
+    return RSS_FEEDS
 
 # Ключові слова для фільтрації релевантного контенту
 RELEVANT_KEYWORDS = [
@@ -116,7 +147,7 @@ RELEVANT_KEYWORDS = [
 ]
 
 
-def fetch_rss_feed(feed_key: str) -> List[Dict]:
+def fetch_rss_feed(feed_key: str, feeds: Optional[Dict[str, Dict]] = None) -> List[Dict]:
     """
     Отримати статті з конкретної RSS-ленти
     
@@ -126,7 +157,7 @@ def fetch_rss_feed(feed_key: str) -> List[Dict]:
     Returns:
         List[Dict] зі статтями
     """
-    feeds = get_rss_feeds_config()
+    feeds = feeds or get_rss_feeds_config()
     if feed_key not in feeds:
         return []
     
@@ -190,7 +221,7 @@ def fetch_rss_feed(feed_key: str) -> List[Dict]:
         return []
 
 
-def fetch_all_feeds() -> List[Dict]:
+def fetch_all_feeds(feeds: Optional[Dict[str, Dict]] = None) -> List[Dict]:
     """
     Отримати статті з усіх RSS-лент
     
@@ -199,11 +230,11 @@ def fetch_all_feeds() -> List[Dict]:
     """
     all_articles = []
 
-    feeds = get_rss_feeds_config()
+    feeds = feeds or get_rss_feeds_config()
     
     for feed_key in feeds:
         print(f"📡 Завантаження {feeds[feed_key]['name']}...")
-        articles = fetch_rss_feed(feed_key)
+        articles = fetch_rss_feed(feed_key, feeds=feeds)
         all_articles.extend(articles)
         print(f"   ✅ {len(articles)} статей")
     
@@ -248,7 +279,7 @@ def filter_relevant_articles(articles: List[Dict],
     return relevant
 
 
-def get_trending_topics(days: int = 7, max_topics: int = 10) -> List[Dict]:
+def get_trending_topics(days: int = 7, max_topics: int = 10, user_id: Optional[str] = None) -> List[Dict]:
     """
     Отримати актуальні тренди за останні N днів
     
@@ -259,7 +290,8 @@ def get_trending_topics(days: int = 7, max_topics: int = 10) -> List[Dict]:
     Returns:
         List[Dict] трендових тем
     """
-    all_articles = fetch_all_feeds()
+    feeds = get_rss_feeds_config(user_id=user_id)
+    all_articles = fetch_all_feeds(feeds=feeds)
     
     # Фільтруємо за датою
     cutoff = datetime.now() - timedelta(days=days)

@@ -7,13 +7,16 @@ from flask_login import LoginManager, login_required, current_user
 from flask_migrate import Migrate
 from config import config
 from database import db, init_db
-from models import User, InstagramAccount, Follower, ParseSession, PublishedContent, ExportHistory, MessageLog, SentMessage, RssTrend, ContentIdea, AutomationSettings, AiCache, GeoSettings, DiscoverCache, DmAssistantSettings, InviteCampaignSettings
+from models import User, InstagramAccount, Follower, ParseSession, PublishedContent, ExportHistory, MessageLog, SentMessage, RssTrend, ContentIdea, AutomationSettings, RssFeedSettings, AiCache, GeoSettings, DiscoverCache, DmAssistantSettings, InviteCampaignSettings
 from instagram_service import InstagramService
 from encryption import encrypt_password, decrypt_password
 from geo_search import normalize_geo_config, get_search_hashtags
 from ai_service import analyze_profile, generate_personalized_message, generate_post_content, batch_analyze_profiles, summarize_trend, OPENAI_API_KEY
 from rss_service import get_trending_topics, generate_content_ideas_from_trends
 from auth import auth_bp
+from billing import billing_bp
+from admin import admin_bp
+from saas import saas_require_subscription, is_admin_email, is_subscription_active
 import os
 from datetime import datetime
 from io import BytesIO, StringIO
@@ -56,9 +59,18 @@ def create_app(config_name=None):
     @login_manager.user_loader
     def load_user(user_id):
         return db.session.get(User, user_id)
+
+    @app.context_processor
+    def inject_saas_flags():
+        return {
+            'is_admin': bool(current_user.is_authenticated and is_admin_email(getattr(current_user, 'email', None))),
+            'saas_require_subscription': saas_require_subscription(),
+        }
     
     # Регистрация blueprints
     app.register_blueprint(auth_bp)
+    app.register_blueprint(billing_bp)
+    app.register_blueprint(admin_bp)
     
     # Создать schema и таблицы при первом запуске
     with app.app_context():
@@ -89,13 +101,55 @@ def create_app(config_name=None):
         return normalize_geo_config(geo_overrides)
     
     # ============ ROUTES ============
+
+    @app.before_request
+    def _saas_subscription_gate():
+        """If SAAS_REQUIRE_SUBSCRIPTION=true, gate paid features for non-subscribed users.
+
+        We intentionally keep an allowlist so we don't have to touch every route.
+        """
+        if not saas_require_subscription():
+            return None
+
+        if request.endpoint is None:
+            return None
+
+        # Always allow static, auth, webhook/billing, and landing
+        allow_prefixes = {
+            'static',
+            'auth.',
+            'billing.',
+        }
+        for prefix in allow_prefixes:
+            if request.endpoint == prefix or request.endpoint.startswith(prefix):
+                return None
+
+        allow_endpoints = {
+            'index',
+            'dashboard',
+            'admin.admin_home',
+        }
+        if request.endpoint in allow_endpoints:
+            return None
+
+        if not current_user.is_authenticated:
+            return None
+
+        if is_admin_email(getattr(current_user, 'email', None)):
+            return None
+
+        if is_subscription_active(current_user.id):
+            return None
+
+        flash('Потрібна активна підписка для доступу до функцій.', 'warning')
+        return redirect(url_for('billing.billing_home', next=request.path))
     
     @app.route('/')
     def index():
-        """Главная страница - редирект на дашборд или логин"""
+        """SaaS landing page."""
         if current_user.is_authenticated:
             return redirect(url_for('dashboard'))
-        return redirect(url_for('auth.login'))
+        return render_template('index.html')
     
     @app.route('/dashboard')
     @login_required
@@ -1425,6 +1479,19 @@ def create_app(config_name=None):
 
         settings = AutomationSettings.query.filter_by(user_id=current_user.id).first()
 
+        rss_settings = RssFeedSettings.query.filter_by(user_id=current_user.id).first()
+        rss_feeds_text = ''
+        try:
+            if rss_settings and rss_settings.feeds:
+                # Prefer "one URL per line" when it's a list
+                if isinstance(rss_settings.feeds, list):
+                    rss_feeds_text = "\n".join([str(u).strip() for u in rss_settings.feeds if str(u).strip()])
+                else:
+                    import json as _json
+                    rss_feeds_text = _json.dumps(rss_settings.feeds, ensure_ascii=False, indent=2)
+        except Exception:
+            rss_feeds_text = ''
+
         return render_template('ai_assistant.html',
             ai_available=bool(OPENAI_API_KEY),
             active_tab=requested_tab,
@@ -1433,7 +1500,8 @@ def create_app(config_name=None):
             generated_content=_latest_cache('content'),
             trends=trends,
             content_ideas=content_ideas,
-            automation_settings=settings
+            automation_settings=settings,
+            rss_feeds_text=rss_feeds_text
         )
     
     @app.route('/ai/analyze', methods=['POST'])
@@ -1581,7 +1649,7 @@ def create_app(config_name=None):
         flask_session.pop('ai_trends', None)
         flask_session.pop('ai_content_ideas', None)
 
-        trends = get_trending_topics(days=14, max_topics=10)
+        trends = get_trending_topics(user_id=current_user.id, days=14, max_topics=10)
         if not trends:
             flash('Не вдалося завантажити тренди з RSS', 'warning')
             return redirect(url_for('ai_assistant', tab='trends'))
@@ -1739,6 +1807,71 @@ def create_app(config_name=None):
         if settings is None:
             settings = AutomationSettings(user_id=current_user.id)
             db.session.add(settings)
+
+        # Per-user RSS feeds (optional). Empty = fallback to defaults.
+        rss_raw = (request.form.get('rss_feeds', '') or '').strip()
+        rss_row = RssFeedSettings.query.filter_by(user_id=current_user.id).first()
+        if rss_raw:
+            parsed_feeds = None
+            try:
+                import json as _json
+                if rss_raw.startswith('[') or rss_raw.startswith('{'):
+                    parsed_feeds = _json.loads(rss_raw)
+            except Exception:
+                parsed_feeds = None
+
+            if parsed_feeds is None:
+                # Treat as newline/comma separated URLs
+                parts = []
+                for line in rss_raw.replace(',', '\n').splitlines():
+                    u = (line or '').strip()
+                    if u:
+                        parts.append(u)
+                # De-dup while keeping order
+                seen = set()
+                urls = []
+                for u in parts:
+                    if u in seen:
+                        continue
+                    seen.add(u)
+                    urls.append(u)
+                parsed_feeds = urls
+
+            # Validate minimal URL shape
+            invalid = []
+            if isinstance(parsed_feeds, list):
+                for u in parsed_feeds:
+                    su = (str(u) if u is not None else '').strip()
+                    if not su or not (su.startswith('http://') or su.startswith('https://')):
+                        invalid.append(str(u))
+                if invalid:
+                    flash('❌ RSS ленти: кожен рядок має бути URL, що починається з http(s)://', 'error')
+                    return redirect(url_for('ai_assistant', tab='trends'))
+            elif isinstance(parsed_feeds, dict):
+                for _, v in parsed_feeds.items():
+                    url = None
+                    if isinstance(v, str):
+                        url = v
+                    elif isinstance(v, dict):
+                        url = v.get('url')
+                    url = (str(url) if url is not None else '').strip()
+                    if not url or not (url.startswith('http://') or url.startswith('https://')):
+                        invalid.append(url)
+                if invalid:
+                    flash('❌ RSS ленти (JSON): кожен feed має містити валідний url з http(s)://', 'error')
+                    return redirect(url_for('ai_assistant', tab='trends'))
+            else:
+                flash('❌ RSS ленти: формат має бути JSON list/dict або список URL (по одному в рядок)', 'error')
+                return redirect(url_for('ai_assistant', tab='trends'))
+
+            if rss_row is None:
+                rss_row = RssFeedSettings(user_id=current_user.id)
+                db.session.add(rss_row)
+            rss_row.feeds = parsed_feeds
+        else:
+            # Clear custom feeds
+            if rss_row is not None:
+                db.session.delete(rss_row)
 
         settings.enabled = enabled
         settings.auto_publish = auto_publish
