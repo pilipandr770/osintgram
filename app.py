@@ -287,27 +287,35 @@ def create_app(config_name=None):
                 DmAssistantSettings, DmThreadState, DmMessage,
                 InviteCampaignSettings, InviteCampaignRecipient, InviteCampaignSend,
                 PublishedContent, MessageLog,
+                DiscoverCache,
             )
 
-            # DM assistant
-            DmMessage.query.filter_by(instagram_account_id=account.id).delete(synchronize_session=False)
-            DmThreadState.query.filter_by(instagram_account_id=account.id).delete(synchronize_session=False)
-            DmAssistantSettings.query.filter_by(instagram_account_id=account.id).delete(synchronize_session=False)
+            # DM assistant - delete first to avoid FK issues
+            DmMessage.query.filter_by(instagram_account_id=account.id).delete(synchronize_session='fetch')
+            DmThreadState.query.filter_by(instagram_account_id=account.id).delete(synchronize_session='fetch')
+            DmAssistantSettings.query.filter_by(instagram_account_id=account.id).delete(synchronize_session='fetch')
 
             # Invite campaign
-            InviteCampaignSend.query.filter_by(instagram_account_id=account.id).delete(synchronize_session=False)
-            InviteCampaignRecipient.query.filter_by(instagram_account_id=account.id).delete(synchronize_session=False)
-            InviteCampaignSettings.query.filter_by(instagram_account_id=account.id).delete(synchronize_session=False)
+            InviteCampaignSend.query.filter_by(instagram_account_id=account.id).delete(synchronize_session='fetch')
+            InviteCampaignRecipient.query.filter_by(instagram_account_id=account.id).delete(synchronize_session='fetch')
+            InviteCampaignSettings.query.filter_by(instagram_account_id=account.id).delete(synchronize_session='fetch')
 
             # Published content history
-            PublishedContent.query.filter_by(instagram_account_id=account.id).delete(synchronize_session=False)
+            PublishedContent.query.filter_by(instagram_account_id=account.id).delete(synchronize_session='fetch')
+
+            # Discover cache
+            DiscoverCache.query.filter_by(instagram_account_id=account.id).delete(synchronize_session='fetch')
 
             # Manual Direct blast logs: delete SentMessage rows linked to MessageLog, then MessageLog
             log_ids = [r[0] for r in db.session.query(MessageLog.id).filter_by(account_id=account.id).all()]
             if log_ids:
-                SentMessage.query.filter(SentMessage.message_log_id.in_(log_ids)).delete(synchronize_session=False)
-                MessageLog.query.filter(MessageLog.id.in_(log_ids)).delete(synchronize_session=False)
+                SentMessage.query.filter(SentMessage.message_log_id.in_(log_ids)).delete(synchronize_session='fetch')
+                MessageLog.query.filter(MessageLog.id.in_(log_ids)).delete(synchronize_session='fetch')
 
+            # Commit dependents first to release locks before deleting the account
+            db.session.commit()
+
+            # Now delete the account itself
             db.session.delete(account)
             db.session.commit()
             flash(f'Аккаунт @{account.instagram_username} удален', 'success')

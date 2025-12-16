@@ -35,6 +35,7 @@ def _workers_loop(flask_app) -> None:
         return
 
     from models import User  # imported after dotenv
+    from database import db
     from dm_assistant_service import poll_and_reply_for_user
     from invite_campaign_service import run_invite_campaign_for_user
     from automation_service import create_scheduled_content_from_new_rss, publish_due_content
@@ -44,18 +45,31 @@ def _workers_loop(flask_app) -> None:
             try:
                 users = User.query.all()
                 for u in users:
-                    created = create_scheduled_content_from_new_rss(u.id, days=2, max_topics=20)
-                    published = publish_due_content(u.id, limit=3)
-                    replied = poll_and_reply_for_user(u.id, threads_limit=10, messages_per_thread=20)
-                    stats = run_invite_campaign_for_user(u.id)
+                    try:
+                        created = create_scheduled_content_from_new_rss(u.id, days=2, max_topics=20)
+                        published = publish_due_content(u.id, limit=3)
+                        replied = poll_and_reply_for_user(u.id, threads_limit=10, messages_per_thread=20)
+                        stats = run_invite_campaign_for_user(u.id)
 
-                    if created or published or replied or stats.get('sent') or stats.get('stopped') or stats.get('failed'):
-                        print(
-                            f"[{datetime.utcnow().isoformat()}] user={u.id} "
-                            f"automation(created={created}, published={published}) "
-                            f"dm_replied={replied} invite={stats}"
-                        )
+                        if created or published or replied or stats.get('sent') or stats.get('stopped') or stats.get('failed'):
+                            print(
+                                f"[{datetime.utcnow().isoformat()}] user={u.id} "
+                                f"automation(created={created}, published={published}) "
+                                f"dm_replied={replied} invite={stats}"
+                            )
+                    except Exception as ue:
+                        # Recover session for next user/iteration
+                        try:
+                            db.session.rollback()
+                        except Exception:
+                            pass
+                        print(f"Worker error for user={u.id}: {ue}")
             except Exception as e:
+                # Recover session for next iteration
+                try:
+                    db.session.rollback()
+                except Exception:
+                    pass
                 print(f"All workers error: {e}")
 
             time.sleep(max(10, WORKERS_LOOP_SECONDS))
